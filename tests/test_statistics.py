@@ -305,3 +305,78 @@ async def test_reimport_di_un_periodo_piu_ampio_non_perde_ore_precedenti(recorde
     prima_ora_giorno2 = _ora("2026-08-01T22:00:00+00:00")
     assert ore[ultima_ora_giorno1]["sum"] == pytest.approx(24.0)
     assert ore[prima_ora_giorno2]["sum"] == pytest.approx(25.0)
+
+
+# --- Serie per fascia ARERA (F1/F2/F3) -----------------------------------------
+
+# Lunedì 3 agosto 2026, giorno feriale (AGOSTO, il 1°, è un sabato).
+LUNEDI = ("20260803", "2026-08-02T22:00:00.000+00:00")
+
+
+def test_statistic_ids_fasce():
+    assert st.statistic_ids_fasce("IT001E00000001") == {
+        "f1": "edistribuzione:it001e00000001_energia_f1",
+        "f2": "edistribuzione:it001e00000001_energia_f2",
+        "f3": "edistribuzione:it001e00000001_energia_f3",
+    }
+
+
+async def test_prelevata_genera_anche_le_serie_per_fascia(recorder_mock, hass):
+    pod = "IT001E00000020"
+    await st.async_import_curva_giornaliera(hass, pod, [_giorno(*LUNEDI, [0.25] * 96)])
+    await async_recorder_block_till_done(hass)
+
+    totale = await _leggi_statistiche(hass, st._sanitize_statistic_id(pod))
+    per_fascia = {
+        f: await _leggi_statistiche(hass, sid) for f, sid in st.statistic_ids_fasce(pod).items()
+    }
+
+    # Stessi timestamp orari della serie totale, in tutte e tre le fasce.
+    assert all(set(ore) == set(totale) for ore in per_fascia.values())
+    assert len(totale) == 24
+
+    # 10:00 locale (CEST) = 08:00 UTC: tutta l'ora in F1, zero nelle altre.
+    ora_10 = _ora("2026-08-03T08:00:00+00:00")
+    assert per_fascia["f1"][ora_10]["state"] == pytest.approx(1.0)
+    assert per_fascia["f2"][ora_10]["state"] == pytest.approx(0.0)
+    assert per_fascia["f3"][ora_10]["state"] == pytest.approx(0.0)
+
+    # Sum finali: F1 11 h, F2 5 h, F3 8 h, e insieme fanno il totale.
+    ultima = max(totale)
+    assert per_fascia["f1"][ultima]["sum"] == pytest.approx(11.0)
+    assert per_fascia["f2"][ultima]["sum"] == pytest.approx(5.0)
+    assert per_fascia["f3"][ultima]["sum"] == pytest.approx(8.0)
+    assert totale[ultima]["sum"] == pytest.approx(24.0)
+
+
+async def test_immessa_non_genera_serie_per_fascia(recorder_mock, hass):
+    pod = "IT001E00000021"
+    giorno = _giorno(*LUNEDI, [0.25] * 96, energy_type="A2")
+    await st.async_import_curva_giornaliera(hass, pod, [giorno], immessa=True)
+    await async_recorder_block_till_done(hass)
+
+    assert await _leggi_statistiche(hass, st._sanitize_statistic_id(pod, immessa=True))
+    for f in ("f1", "f2", "f3"):
+        assert not await _leggi_statistiche(
+            hass, st._sanitize_statistic_id(pod, immessa=True, fascia=f)
+        )
+        assert not await _leggi_statistiche(hass, st._sanitize_statistic_id(pod, fascia=f))
+
+
+async def test_rettifica_si_propaga_anche_alle_fasce(recorder_mock, hass):
+    """Una rettifica corregge la serie per fascia come la totale: stessa
+    source of truth, stesso ricalcolo completo."""
+    pod = "IT001E00000022"
+    id_10_00 = 10 * 4 + 1  # primo quarto d'ora delle 10:00 locali
+    prima = _giorno_sparso(*LUNEDI, {id_10_00: 300.0})
+    await st.async_import_curva_giornaliera(hass, pod, [prima])
+    await async_recorder_block_till_done(hass)
+
+    dopo = _giorno_sparso(*LUNEDI, {id_10_00: 0.3})
+    await st.async_import_curva_giornaliera(hass, pod, [dopo])
+    await async_recorder_block_till_done(hass)
+
+    f1 = await _leggi_statistiche(hass, st.statistic_ids_fasce(pod)["f1"])
+    ora_10 = _ora("2026-08-03T08:00:00+00:00")
+    assert f1[ora_10]["state"] == pytest.approx(0.3)
+    assert f1[ora_10]["sum"] == pytest.approx(0.3)

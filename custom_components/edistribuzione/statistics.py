@@ -55,6 +55,15 @@ Ogni POD ha DUE serie distinte, una per direzione dell'energia:
     edistribuzione:<pod>_energia            prelevata (MAGNITUDE_PRELEVATA)
     edistribuzione:<pod>_energia_immessa    immessa (MAGNITUDE_IMMESSA)
 
+Per le direzioni in DIREZIONI_CON_FASCE (oggi solo la prelevata) si
+scrivono anche tre serie per fascia ARERA, ricalcolate dagli stessi
+campioni a 15' e con gli stessi timestamp orari della serie totale:
+
+    edistribuzione:<pod>_energia_f1 / _f2 / _f3
+
+Non vanno aggiunte alla Energy Dashboard insieme alla serie totale (il
+prelievo verrebbe contato due volte): o la totale, o le tre fasce.
+
 La direzione la decide chi chiama async_import_curva_giornaliera (quale
 magnitude ha chiesto all'API), non questo modulo: qui non si interpreta
 'energyType' per instradare i dati, solo per fidarsi di chi ci passa i dati
@@ -85,16 +94,21 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from . import raw_storage
-from .const import DOMAIN, MAGNITUDE_IMMESSA, MAGNITUDE_PRELEVATA
+from . import fasce, raw_storage
+from .const import DIREZIONI_CON_FASCE, DOMAIN, MAGNITUDE_IMMESSA, MAGNITUDE_PRELEVATA
 
 _LOGGER = logging.getLogger(__name__)
 
 
-def _sanitize_statistic_id(pod: str, *, immessa: bool = False) -> str:
-    """Uno statistic_id per POD e direzione."""
+def _sanitize_statistic_id(
+    pod: str, *, immessa: bool = False, fascia: str | None = None
+) -> str:
+    """Uno statistic_id per POD e direzione, e opzionalmente per fascia
+    ARERA (fasce.F1/F2/F3)."""
     slug = re.sub(r"[^a-z0-9_]", "_", pod.lower())
     suffisso = "_energia_immessa" if immessa else "_energia"
+    if fascia is not None:
+        suffisso += f"_{fascia}"
     return f"{DOMAIN}:{slug}{suffisso}"
 
 
@@ -103,6 +117,37 @@ def statistic_ids(pod: str) -> tuple[str, str]:
     pubblico per chi (es. energy_dashboard.py) deve sapere quali statistiche
     esistono per un POD senza replicare la logica di naming."""
     return _sanitize_statistic_id(pod), _sanitize_statistic_id(pod, immessa=True)
+
+
+def statistic_ids_fasce(pod: str) -> dict[str, str]:
+    """{fascia: statistic_id} delle serie per fascia della prelevata."""
+    return {f: _sanitize_statistic_id(pod, fascia=f) for f in fasce.FASCE}
+
+
+def _serie_cumulativa(ore: list[tuple[datetime, float]]) -> list[dict]:
+    """Righe per async_add_external_statistics: state = kWh dell'ora,
+    sum = cumulativa dall'inizio della serie."""
+    running_sum = 0.0
+    stats = []
+    for inizio_ora, kwh in ore:
+        running_sum += kwh
+        stats.append({"start": inizio_ora, "state": kwh, "sum": running_sum})
+    return stats
+
+
+def _metadata(statistic_id: str, nome: str) -> dict:
+    return {
+        "has_mean": False,
+        "mean_type": StatisticMeanType.NONE,
+        "has_sum": True,
+        # Riscritto a ogni import: cambiare il ruolo del POD nelle opzioni si
+        # propaga da solo al primo aggiornamento successivo, senza migrazioni.
+        "name": nome,
+        "source": DOMAIN,
+        "statistic_id": statistic_id,
+        "unit_of_measurement": "kWh",
+        "unit_class": "energy",
+    }
 
 
 def _aggrega_ore(campioni: list[tuple[datetime, float]]) -> list[tuple[datetime, float]]:
@@ -192,26 +237,25 @@ async def async_import_curva_giornaliera(
         return None
 
     statistic_id = _sanitize_statistic_id(pod, immessa=immessa)
-    running_sum = 0.0
-    stats = []
-    for inizio_ora, kwh in ore:
-        running_sum += kwh
-        stats.append({"start": inizio_ora, "state": kwh, "sum": running_sum})
+    nome_serie = nome or f"E-Distribuzione {pod}{' (immessa)' if immessa else ''}"
+    stats = _serie_cumulativa(ore)
+    async_add_external_statistics(hass, _metadata(statistic_id, nome_serie), stats)
 
-    metadata = {
-        "has_mean": False,
-        "mean_type": StatisticMeanType.NONE,
-        "has_sum": True,
-        # Riscritto a ogni import: cambiare il ruolo del POD nelle opzioni si
-        # propaga da solo al primo aggiornamento successivo, senza migrazioni.
-        "name": nome or f"E-Distribuzione {pod}{' (immessa)' if immessa else ''}",
-        "source": DOMAIN,
-        "statistic_id": statistic_id,
-        "unit_of_measurement": "kWh",
-        "unit_class": "energy",
-    }
-
-    async_add_external_statistics(hass, metadata, stats)
+    if direzione in DIREZIONI_CON_FASCE:
+        # Stessa source of truth, stesso ricalcolo completo: anche le serie
+        # per fascia si correggono da sole con le rettifiche, e la prima
+        # volta si popolano con TUTTO lo storico già presente in
+        # raw_storage, senza bisogno di rilanciare recupera_storico.
+        ore_per_fascia = fasce.aggrega_ore_per_fascia(tutti_campioni)
+        for f, ore_fascia in ore_per_fascia.items():
+            async_add_external_statistics(
+                hass,
+                _metadata(
+                    _sanitize_statistic_id(pod, immessa=immessa, fascia=f),
+                    f"{nome_serie} {f.upper()}",
+                ),
+                _serie_cumulativa(ore_fascia),
+            )
     ultima_data = dt_util.as_local(stats[-1]["start"]).date()
     _LOGGER.info(
         "POD %s (%s): serie ricalcolata da raw_storage, %d ore totali, ultimo punto %s",

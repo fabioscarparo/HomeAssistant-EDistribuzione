@@ -64,6 +64,11 @@ MAGNITUDE_IMMESSA = "A2"
 
 MAGNITUDE_TUTTE = (MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA)
 
+# Direzioni per cui si generano anche le serie per fascia ARERA (F1/F2/F3,
+# vedi fasce.py). Solo la prelevata: è l'energia che il venditore fattura
+# per fascia; l'immessa non ha un prezzo per fascia nei contratti domestici.
+DIREZIONI_CON_FASCE = (MAGNITUDE_PRELEVATA,)
+
 # --- Configurazione persistita ------------------------------------------------
 CONF_PODS = "pods"  # lista di codici POD: tutti sulla stessa utenza già autenticata
 CONF_REFRESH_TOKEN = "refresh_token"

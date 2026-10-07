@@ -60,6 +60,49 @@ Autoconsumo e consumo totale casa sono calcolati automaticamente da Home
 Assistant a partire da produzione + immissione + prelievo - non servono
 sensori aggiuntivi.
 
+## Fasce orarie F1 / F2 / F3
+
+Per la direzione **prelevata** l'integrazione scrive anche tre serie per
+fascia ARERA, calcolate dagli stessi campioni a 15 minuti:
+
+| Statistica                       | Fascia                                                         |
+| -------------------------------- | -------------------------------------------------------------- |
+| `edistribuzione:<pod>_energia_f1` | lun-ven 8-19                                                   |
+| `edistribuzione:<pod>_energia_f2` | lun-ven 7-8 e 19-23, sabato 7-23                               |
+| `edistribuzione:<pod>_energia_f3` | notte (23-7), domenica e festivi nazionali tutto il giorno     |
+
+Le tre serie hanno gli stessi timestamp orari della serie totale e ora per
+ora F1 + F2 + F3 = totale. Si ricalcolano da `edistribuzione_curve.db` come
+la totale: al primo import dopo l'aggiornamento compaiono già con tutto lo
+storico scaricato in precedenza, e seguono da sole le rettifiche.
+
+La classificazione usa sempre l'ora italiana (Europe/Rome), indipendentemente
+dal fuso configurato in Home Assistant. Le festività sono le 11 storiche
+(Pasquetta compresa, patroni locali esclusi) più il 4 ottobre dal 2026
+(L. 151/2025): se le letture ufficiali di ottobre 2027 dicessero il
+contrario, basta `SAN_FRANCESCO_FESTIVO = False` in `fasce.py`.
+
+**Grafico per fascia** (scheda statistiche):
+
+```yaml
+type: statistics-graph
+title: Prelievo per fascia
+chart_type: bar
+period: day
+days_to_show: 30
+stat_types:
+  - change
+entities:
+  - edistribuzione:<pod>_energia_f1
+  - edistribuzione:<pod>_energia_f2
+  - edistribuzione:<pod>_energia_f3
+```
+
+**Energy Dashboard:** in alternativa alla serie totale si possono aggiungere
+le tre fasce come tre consumi dalla rete distinti, ciascuno col proprio
+prezzo. Mai la totale *e* le fasce insieme: il prelievo verrebbe contato due
+volte. `configura_energy_dashboard` continua ad aggiungere solo la totale.
+
 ## Architettura: 15 minuti come source of truth
 
 I campioni a 15 minuti restituiti da E-Distribuzione (96/giorno) non vengono
