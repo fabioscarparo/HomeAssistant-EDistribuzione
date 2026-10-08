@@ -1,92 +1,96 @@
 # HomeAssistant-EDistribuzione
 
-Integrazione custom per Home Assistant, dedicata a **E-Distribuzione**.
+Custom Home Assistant integration for **E-Distribuzione**, the main Italian
+electricity distribution network operator.
 
-Per ogni POD configurato importa **entrambe** le direzioni dell'energia come
-statistiche esterne, visibili nella Energy Dashboard:
+For every configured POD it imports **both** energy directions as external
+statistics, ready for the Energy Dashboard:
 
-- **prelevata** (consumo dalla rete)
-- **immessa** (immissione in rete / produzione fotovoltaica)
+- **consumption** (energy drawn from the grid)
+- **injection** (energy returned to the grid / solar production)
 
-Ogni POD ha un **ruolo** configurabile (contatore normale/scambio, oppure
-fotovoltaico/produzione): influenza solo i nomi mostrati, non quali dati
-vengono scaricati - entrambe le direzioni si acquisiscono sempre, per ogni
-POD, a prescindere dal ruolo.
+Each POD has a configurable **role** (regular/exchange meter, or
+solar/production meter). The role only changes the names shown, not which
+data is downloaded: both directions are always fetched for every POD,
+whatever its role.
 
-## Installazione
+## Installation
 
-### Tramite HACS (consigliato)
+### Via HACS (recommended)
 
-Non è nello store predefinito di HACS: va aggiunto come repository custom.
+The integration is not in the default HACS store: add it as a custom
+repository.
 
-1. HACS → menu (⋮ in alto a destra) → **Repository personalizzati**
-2. URL: `https://github.com/maurobraggio/HomeAssistant-EDistribuzione`,
-   categoria **Integrazione**
-3. Cerca "**E-Distribuzione**" in HACS → **Scarica**
-4. Riavvia Home Assistant
+1. HACS → menu (⋮ top right) → **Custom repositories**
+2. URL: `https://github.com/fabioscarparo/HomeAssistant-EDistribuzione`,
+   type **Integration**
+3. Search for "**E-Distribuzione**" in HACS → **Download**
+4. Restart Home Assistant
 
-### Manuale (alternativa)
+### Manual (alternative)
 
-Copia `custom_components/edistribuzione/` nella cartella
-`custom_components/` della tua istanza Home Assistant, poi riavvia.
+Copy `custom_components/edistribuzione/` into the `custom_components/`
+folder of your Home Assistant instance, then restart.
 
-### Configurazione
+### Setup
 
-*Impostazioni → Dispositivi e servizi → Aggiungi integrazione → E-Distribuzione.*
+*Settings → Devices & services → Add integration → E-Distribuzione.*
 
-Serve: email e password dell'area clienti E-Distribuzione, e il codice OTP
-che ricevi via email o SMS durante la configurazione.
+You need the email and password of your E-Distribuzione customer area, plus
+the OTP code you receive by email or SMS during setup.
 
-## Configurazione del ruolo POD
+## POD role
 
-*Impostazioni → Dispositivi e servizi → E-Distribuzione → Configura → Tipo
-di contatore per POD.* Modificabile in qualunque momento.
+*Settings → Devices & services → E-Distribuzione → Configure → Tipo di
+contatore per POD* (meter type per POD; the integration's own dialogs are
+currently in Italian only). You can change it at any time.
 
 ## Energy Dashboard
 
-Per un impianto con un contatore di scambio (M1) e uno di produzione (M2):
+For a system with an exchange meter (M1) and a production meter (M2):
 
-| Sezione | Statistica |
+| Section | Statistic |
 |---|---|
-| Rete → Consumo dalla rete | `edistribuzione:<pod_m1>_energia` |
-| Rete → Ritorno alla rete | `edistribuzione:<pod_m1>_energia_immessa` |
-| Pannelli solari → Produzione | `edistribuzione:<pod_m2>_energia_immessa` |
+| Electricity grid → Grid consumption | `edistribuzione:<pod_m1>_energia` |
+| Electricity grid → Return to grid | `edistribuzione:<pod_m1>_energia_immessa` |
+| Solar panels → Solar production | `edistribuzione:<pod_m2>_energia_immessa` |
 
-`edistribuzione:<pod_m2>_energia` (la prelevata del contatore di
-produzione, tipicamente lo stand-by dell'inverter, qualche decimo di kWh al
-mese) resta disponibile ma non va in nessuna sezione della dashboard.
+`edistribuzione:<pod_m2>_energia` (the consumption of the production meter,
+typically the inverter's standby draw, a few tenths of a kWh per month)
+stays available but does not belong in any dashboard section.
 
-Autoconsumo e consumo totale casa sono calcolati automaticamente da Home
-Assistant a partire da produzione + immissione + prelievo - non servono
-sensori aggiuntivi.
+Self-consumption and total home consumption are calculated automatically by
+Home Assistant from production, injection and consumption: no extra sensors
+are needed.
 
-## Fasce orarie F1 / F2 / F3
+## F1 / F2 / F3 time bands
 
-Per la direzione **prelevata** l'integrazione scrive anche tre serie per
-fascia ARERA, calcolate dagli stessi campioni a 15 minuti:
+For the **consumption** direction the integration also writes three series,
+one per ARERA time band, calculated from the same 15-minute samples:
 
-| Statistica                       | Fascia                                                         |
-| -------------------------------- | -------------------------------------------------------------- |
-| `edistribuzione:<pod>_energia_f1` | lun-ven 8-19                                                   |
-| `edistribuzione:<pod>_energia_f2` | lun-ven 7-8 e 19-23, sabato 7-23                               |
-| `edistribuzione:<pod>_energia_f3` | notte (23-7), domenica e festivi nazionali tutto il giorno     |
+| Statistic                         | Time band                                                       |
+| --------------------------------- | --------------------------------------------------------------- |
+| `edistribuzione:<pod>_energia_f1` | Mon-Fri 08:00-19:00                                             |
+| `edistribuzione:<pod>_energia_f2` | Mon-Fri 07:00-08:00 and 19:00-23:00, Saturday 07:00-23:00       |
+| `edistribuzione:<pod>_energia_f3` | nights (23:00-07:00), Sundays and national holidays all day     |
 
-Le tre serie hanno gli stessi timestamp orari della serie totale e ora per
-ora F1 + F2 + F3 = totale. Si ricalcolano da `edistribuzione_curve.db` come
-la totale: al primo import dopo l'aggiornamento compaiono già con tutto lo
-storico scaricato in precedenza, e seguono da sole le rettifiche.
+The three series share the hourly timestamps of the total series, and hour
+by hour F1 + F2 + F3 = total. Like the total, they are recalculated from
+`edistribuzione_curve.db`: on the first import after the update they already
+cover all the history downloaded so far, and they follow corrections on
+their own.
 
-La classificazione usa sempre l'ora italiana (Europe/Rome), indipendentemente
-dal fuso configurato in Home Assistant. Le festività sono le 11 storiche
-(Pasquetta compresa, patroni locali esclusi) più il 4 ottobre dal 2026
-(L. 151/2025): se le letture ufficiali di ottobre 2027 dicessero il
-contrario, basta `SAN_FRANCESCO_FESTIVO = False` in `fasce.py`.
+Classification always uses Italian time (Europe/Rome), whatever time zone
+Home Assistant is configured with. Holidays are the 11 traditional ones
+(Easter Monday included, local patron saints excluded) plus October 4 from
+2026 on (Law 151/2025). If the official October 2027 readings say
+otherwise, set `SAN_FRANCESCO_FESTIVO = False` in `fasce.py`.
 
-**Grafico per fascia** (scheda statistiche):
+**Chart by time band** (statistics graph card):
 
 ```yaml
 type: statistics-graph
-title: Prelievo per fascia
+title: Consumption by time band
 chart_type: bar
 period: day
 days_to_show: 30
@@ -98,88 +102,87 @@ entities:
   - edistribuzione:<pod>_energia_f3
 ```
 
-**Energy Dashboard:** in alternativa alla serie totale si possono aggiungere
-le tre fasce come tre consumi dalla rete distinti, ciascuno col proprio
-prezzo. Mai la totale *e* le fasce insieme: il prelievo verrebbe contato due
-volte. `configura_energy_dashboard` continua ad aggiungere solo la totale.
+**Energy Dashboard:** instead of the total series you can add the three
+bands as three separate grid consumption sources, each with its own price.
+Never add the total *and* the bands together, or consumption is counted
+twice. `configura_energy_dashboard` still adds the total only.
 
-## Card Lovelace del POD
+## POD Lovelace card
 
-L'integrazione porta con sé una card (`custom:edistribuzione-pod-card`) e
-la registra da sola nel frontend: niente risorse Lovelace da aggiungere a
-mano, niente secondo repository HACS. Compare nel selettore delle card come
-"E-Distribuzione · POD" e ha un editor visuale.
+The integration ships a card (`custom:edistribuzione-pod-card`) and
+registers it in the frontend by itself: no Lovelace resources to add by
+hand, no second HACS repository. It shows up in the card picker as
+"E-Distribuzione · POD" and has a visual editor.
 
 ```yaml
 type: custom:edistribuzione-pod-card
-pod: it001e12345678     # opzionale: senza, usa il primo POD trovato
-name: Contatore         # opzionale
+pod: it001e12345678     # optional: defaults to the first POD found
+name: Meter             # optional
 icon: mdi:transmission-tower
 period: month           # day | week | month | year
 show_injection: true
 ```
 
-Mostra prelievo e immissione del periodo, la ripartizione F1/F2/F3 e un
-grafico a barre impilate per fascia (ore nella vista giorno, giorni in
-settimana e mese, mesi nell'anno), con navigazione limitata al periodo in
-cui esistono dati. Usa solo i token del tema di Home Assistant (colori
-energia, tipografia, raggi, tile icon, control select, tema dei grafici),
-quindi segue tema chiaro/scuro e temi personalizzati, oltre a lingua,
-formato numeri, formato orario e primo giorno della settimana del profilo.
+It shows the period's consumption and injection, the F1/F2/F3 split and a
+stacked bar chart by time band (hours in the day view, days in the week and
+month views, months in the year view), with navigation limited to the
+period that has data. It only uses Home Assistant theme tokens (energy
+colors, typography, radii, tile icon, control select, chart theme), so it
+follows light/dark mode and custom themes, as well as the language, number
+format, time format and first day of the week set in the user profile.
 
-## Architettura: 15 minuti come source of truth
+## Architecture: 15-minute data as the source of truth
 
-I campioni a 15 minuti restituiti da E-Distribuzione (96/giorno) non vengono
-aggregati e scartati: finiscono per primi in un database SQLite proprio
-dell'integrazione (`edistribuzione_curve.db`, nella cartella di
-configurazione di Home Assistant - un file indipendente, mai lo stesso
-database del Recorder). Solo dopo, dai campioni realmente memorizzati, si
-ricalcolano i bucket orari e la somma cumulativa che vanno nella Energy
-Dashboard:
+The 15-minute samples returned by E-Distribuzione (96 per day) are not
+aggregated and thrown away: they first go into the integration's own SQLite
+database (`edistribuzione_curve.db`, in the Home Assistant configuration
+folder; a separate file, never the Recorder database). Only then are the
+hourly buckets and the cumulative sum for the Energy Dashboard recalculated
+from the samples actually stored:
 
 ```
-API E-Distribuzione (15')  ->  raw storage (upsert)  ->  bucket orari + sum  ->  Energy Dashboard
+E-Distribuzione API (15')  ->  raw storage (upsert)  ->  hourly buckets + sum  ->  Energy Dashboard
 ```
 
-Questo rende ogni import **idempotente e capace di autocorreggersi**: se
-E-Distribuzione rettifica in un secondo momento un campione già scaricato
-(succede), un nuovo `recupera_storico` sullo stesso periodo sovrascrive
-quel campione (stesso POD, stessa direzione, stesso istante) invece di
-duplicarlo, e ricalcola da zero sia l'ora toccata sia tutte le somme
-cumulative successive - il risultato finale non dipende dall'ordine in cui
-storico, retry e rettifiche sono arrivati.
+This makes every import **idempotent and self-correcting**: if
+E-Distribuzione later corrects a sample that was already downloaded (it
+happens), a new `recupera_storico` over the same period overwrites that
+sample (same POD, same direction, same instant) instead of duplicating it,
+and recalculates from scratch both the affected hour and all the following
+cumulative sums. The final result does not depend on the order in which
+history, retries and corrections arrived.
 
-Per le stesse ragioni, il ciclo automatico giornaliero non richiede più solo
-il giorno precedente: ricontrolla sempre gli ultimi `GIORNI_RICONTROLLO`
-giorni (3 di default, in una sola richiesta per direzione, non una per
-giorno), così una rettifica recente viene vista da sola senza dover lanciare
-`recupera_storico` a mano.
+For the same reasons, the automatic daily cycle does not request only the
+previous day: it always rechecks the last `GIORNI_RICONTROLLO` days (3 by
+default, in a single request per direction, not one per day), so a recent
+correction is picked up automatically without running `recupera_storico` by
+hand.
 
-## Recupero storico
+## Fetching history
 
-Azione `edistribuzione.recupera_storico(device_id, data_da, data_a)`: una
-sola richiesta per direzione per l'intero periodo (confermato funzionante
-fino a 181 giorni in un'unica risposta). Scegliendo il dispositivo di un
-singolo POD il recupero si limita a quello; scegliendo il dispositivo
-"E-Distribuzione" (account) copre tutti i POD configurati.
+Action `edistribuzione.recupera_storico(device_id, data_da, data_a)`: a
+single request per direction for the whole period (confirmed to work for up
+to 181 days in one response). Choosing a single POD's device limits the
+fetch to that POD; choosing the "E-Distribuzione" (account) device covers
+all configured PODs.
 
-Rilanciarlo sullo stesso periodo è sempre sicuro: aggiorna/corregge invece
-di duplicare (vedi sopra).
+Running it again over the same period is always safe: it updates and
+corrects instead of duplicating (see above).
 
-## Verificare il protocollo prima di fidarsi dei dati
+## Verifying the protocol before trusting the data
 
 ```bash
 pip install -r requirements_test.txt
 python scripts/verify_login.py
 ```
 
-Lo script fa login (email/password/OTP), elenca i POD dell'account e sonda
-diversi candidati per `magnitude` sull'endpoint dati, confrontando i totali
-per scoprire quale restituisce l'energia immessa. Se un candidato risulta
-corretto, aggiorna **solo** `MAGNITUDE_IMMESSA` in
+The script logs in (email/password/OTP), lists the account's PODs and
+probes several `magnitude` candidates on the data endpoint, comparing the
+totals to find out which one returns injected energy. If a candidate turns
+out to be correct, update **only** `MAGNITUDE_IMMESSA` in
 `custom_components/edistribuzione/const.py`.
 
-## Sviluppo
+## Development
 
 ```bash
 python3 -m venv .venv
@@ -188,11 +191,16 @@ python3 -m venv .venv
 .venv/bin/ruff check custom_components/ tests/ scripts/
 ```
 
-## Origine
+## Origin
 
-Il protocollo (login OAuth2+PKCE+OTP via Salesforce, client REST MuleSoft
-per i dati) è stato reverse-engineered per l'integrazione multi-distributore
+This is a fork of
+[maurobraggio/HomeAssistant-EDistribuzione](https://github.com/maurobraggio/HomeAssistant-EDistribuzione)
+that adds the F1/F2/F3 time bands and the POD card.
+
+The protocol (OAuth2 + PKCE + OTP login via Salesforce, MuleSoft REST
+client for the data) was reverse-engineered for the multi-distributor
+integration
 [HomeAssistant-Contatore](https://github.com/riccardorossi92/HomeAssistant-Contatore),
-che resta la scelta giusta per chi ha anche Duereti, Unareti o Areti. Questo
-repository è dedicato solo a E-Distribuzione, con supporto nativo per
-prelevata/immessa separate e un ruolo configurabile per POD.
+which remains the right choice if you also deal with Duereti, Unareti or
+Areti. This repository is dedicated to E-Distribuzione only, with native
+support for separate consumption/injection and a configurable role per POD.
