@@ -1,4 +1,18 @@
-# HomeAssistant-EDistribuzione
+<p align="center">
+  <img src="docs/images/header.svg" alt="E-Distribuzione Home Assistant" width="240">
+</p>
+
+<p align="center">
+  <strong>Home Assistant integration for E-Distribuzione meters,<br>
+  with 15-minute data and F1/F2/F3 time bands.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/commits/main"><img alt="Version" src="https://img.shields.io/github/manifest-json/v/fabioscarparo/HomeAssistant-EDistribuzione?filename=custom_components%2Fedistribuzione%2Fmanifest.json&label=Version&color=5CC300"></a>
+  <a href="https://hacs.xyz/"><img alt="HACS Custom" src="https://img.shields.io/badge/HACS-Custom-41BDF5?logo=homeassistantcommunitystore&logoColor=fff"></a>
+  <a href="https://www.home-assistant.io/"><img alt="Home Assistant 2025.4+" src="https://img.shields.io/badge/Home_Assistant-2025.4%2B-18BCF2?logo=homeassistant&logoColor=fff"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff"></a>
+</p>
 
 Custom Home Assistant integration for **E-Distribuzione**, the main Italian
 electricity distribution network operator.
@@ -16,6 +30,8 @@ Each POD has a configurable role:
 
 The role only changes how entities and statistics are named. **Both
 directions are always downloaded for every POD**, whatever its role.
+
+---
 
 ## Installation
 
