@@ -67,7 +67,10 @@ def test_ogni_translation_key_del_codice_esiste():
     }
     it = _carica("it")
     definite = (
-        set(it["entity"]["sensor"]) | set(it["exceptions"]) | set(it["selector"])
+        set(it["entity"]["sensor"])
+        | set(it["exceptions"])
+        | set(it["selector"])
+        | set(it["issues"])
     )
     assert usate, "nessuna translation_key trovata nel codice: regex da aggiornare"
     assert usate <= definite, usate - definite

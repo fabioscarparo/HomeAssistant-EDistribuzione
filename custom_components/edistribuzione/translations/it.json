@@ -31,13 +31,15 @@
       "invalid_otp": "Codice OTP errato o scaduto. Deve essere il codice inviato da questa configurazione: uno generato sul sito o nell'app appartiene a un'altra sessione di login e viene sempre rifiutato.",
       "otp_mancante": "Inserisci il codice OTP, oppure spunta \"Richiedi un nuovo codice\" per farne inviare uno nuovo",
       "troppe_sessioni": "E-Distribuzione ha rifiutato l'accesso perché l'account ha troppe sessioni aperte contemporaneamente. Esci dall'app ufficiale e dal sito, attendi qualche minuto e riprova: in questo stato nessun codice OTP viene inviato.",
-      "nessun_pod_selezionato": "Seleziona almeno un POD"
+      "nessun_pod_selezionato": "Seleziona almeno un POD",
+      "accesso_bloccato": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot, quindi l'integrazione non riesce ad accedere. Non dipende dalle tue credenziali: riprova più tardi, senza insistere."
     },
     "abort": {
       "reauth_successful": "Credenziali aggiornate con successo",
       "no_pods_found": "Nessun POD trovato per questo account",
       "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova la configurazione da capo (login + OTP inclusi).",
-      "otp_exchange_failed": "Il codice OTP è stato accettato ma il completamento dell'accesso è fallito. Riprova la configurazione da capo (login + OTP inclusi)."
+      "otp_exchange_failed": "Il codice OTP è stato accettato ma il completamento dell'accesso è fallito. Riprova la configurazione da capo (login + OTP inclusi).",
+      "accesso_bloccato": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot, quindi l'integrazione non riesce ad accedere. Non dipende dalle tue credenziali: riprova più tardi, senza insistere."
     }
   },
   "options": {
@@ -85,7 +87,8 @@
       "nessun_pod_selezionato": "Seleziona almeno un POD da aggiungere",
       "nessun_pod_da_aggiungere": "Tutti i POD del tuo account sono già configurati qui",
       "refresh_failed": "Non è stato possibile rinnovare l'accesso a E-Distribuzione. Riprova più tardi; se il problema persiste potrebbe servire un nuovo login (rimuovi e riconfigura l'integrazione).",
-      "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova più tardi."
+      "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova più tardi.",
+      "accesso_bloccato": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot, quindi l'integrazione non riesce ad accedere. Non dipende dalle tue credenziali: riprova più tardi, senza insistere."
     }
   },
   "entity": {
@@ -197,6 +200,15 @@
     },
     "errore_import_pod": {
       "message": "Errore importando il periodo per il POD {pod}: {errore}"
+    },
+    "accesso_bloccato": {
+      "message": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot. I consumi riprendono ad aggiornarsi appena l'accesso torna disponibile."
+    }
+  },
+  "issues": {
+    "accesso_bloccato": {
+      "title": "E-Distribuzione blocca l'accesso automatico",
+      "description": "E-Distribuzione risponde con una verifica antibot invece di concedere l'accesso, quindi l'integrazione non riesce a rinnovarlo e i consumi non si aggiornano. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano. L'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile."
     }
   }
 }

@@ -105,6 +105,10 @@ RITARDO_DATI_GIORNI = 1
 # l'endpoint accetta già un intervallo multi-giorno.
 GIORNI_RICONTROLLO = 3
 
+# Avviso in Impostazioni > Riparazioni quando E-Distribuzione risponde con la
+# verifica antibot invece che con il token (vedi auth.AccessoBloccato).
+ISSUE_ACCESSO_BLOCCATO = "accesso_bloccato"
+
 CONF_DATA_INSTALLAZIONE = "data_installazione"
 CONF_GIORNI_DA_RIPROVARE = "giorni_da_riprovare"
 CONF_ORA_RICHIESTA = "ora_richiesta"

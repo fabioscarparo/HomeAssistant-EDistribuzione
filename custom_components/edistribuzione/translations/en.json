@@ -31,13 +31,15 @@
       "invalid_otp": "Wrong or expired OTP code. It must be the code sent by this setup: one generated on the website or in the app belongs to another login session and is always rejected.",
       "otp_mancante": "Enter the OTP code, or tick \"Request a new code\" to have a new one sent",
       "troppe_sessioni": "E-Distribuzione refused the login because the account has too many concurrent sessions open. Log out of the official app and website, wait a few minutes and try again: in this state no OTP code is sent.",
-      "nessun_pod_selezionato": "Select at least one POD"
+      "nessun_pod_selezionato": "Select at least one POD",
+      "accesso_bloccato": "E-Distribuzione is currently blocking automated access with an anti-bot check, so the integration cannot sign in. It does not depend on your credentials: try again later, without insisting."
     },
     "abort": {
       "reauth_successful": "Credentials updated successfully",
       "no_pods_found": "No POD found for this account",
       "supplies_failed": "Unexpected error while retrieving the PODs from the account. Start the setup again from the beginning (login and OTP included).",
-      "otp_exchange_failed": "The OTP code was accepted but completing the login failed. Start the setup again from the beginning (login and OTP included)."
+      "otp_exchange_failed": "The OTP code was accepted but completing the login failed. Start the setup again from the beginning (login and OTP included).",
+      "accesso_bloccato": "E-Distribuzione is currently blocking automated access with an anti-bot check, so the integration cannot sign in. It does not depend on your credentials: try again later, without insisting."
     }
   },
   "options": {
@@ -85,7 +87,8 @@
       "nessun_pod_selezionato": "Select at least one POD to add",
       "nessun_pod_da_aggiungere": "All the PODs on your account are already configured here",
       "refresh_failed": "Unable to renew access to E-Distribuzione. Try again later; if the problem persists a new login may be needed (remove and set up the integration again).",
-      "supplies_failed": "Unexpected error while retrieving the PODs from the account. Try again later."
+      "supplies_failed": "Unexpected error while retrieving the PODs from the account. Try again later.",
+      "accesso_bloccato": "E-Distribuzione is currently blocking automated access with an anti-bot check, so the integration cannot sign in. It does not depend on your credentials: try again later, without insisting."
     }
   },
   "entity": {
@@ -197,6 +200,15 @@
     },
     "errore_import_pod": {
       "message": "Error importing the period for POD {pod}: {errore}"
+    },
+    "accesso_bloccato": {
+      "message": "E-Distribuzione is currently blocking automated access with an anti-bot check. Consumption data will update again as soon as access is available."
+    }
+  },
+  "issues": {
+    "accesso_bloccato": {
+      "title": "E-Distribuzione is blocking automated access",
+      "description": "E-Distribuzione answers with an anti-bot check instead of granting access, so the integration cannot renew it and consumption data does not update. It does not depend on your setup or credentials, and the data already imported is kept. The integration retries on its own every hour and this notice disappears as soon as access is available again."
     }
   }
 }

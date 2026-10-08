@@ -97,6 +97,11 @@ kept.
   and submit the form.
 - **Too many concurrent sessions?** Log out of the official app and website,
   wait a few minutes and try again.
+- **"E-Distribuzione is currently blocking automated access"?** E-Distribuzione
+  is answering with an anti-bot check instead of the login page. It does not
+  depend on your setup or credentials: try again later, without insisting.
+  Installations already set up show the same notice in **Settings →
+  Repairs**, and resume on their own once access works again.
 
 ### 2. Select the PODs
 

@@ -80,6 +80,17 @@ _MARCATORI_TROPPE_SESSIONI = (
     "sessioni consentite",
 )
 
+# Pagine della protezione antibot di Imperva (Incapsula), che risponde al
+# posto di login e token endpoint quando classifica il traffico come
+# automatico: la verifica JavaScript "Pardon Our Interruption" (osservata
+# l'8 ottobre 2026, status 200) e il blocco "Incapsula incident ID". Solo
+# marcatori di queste due pagine: lo script _Incapsula_Resource può
+# comparire anche nelle pagine normali di un sito protetto.
+_MARCATORI_ANTIBOT = (
+    "pardon our interruption",
+    "incapsula incident id",
+)
+
 # Testo con cui la risposta al primo submit del form conferma di avere
 # spedito il codice (confermato su HAR reale: "Abbiamo inviato un codice a 5
 # cifre al tuo indirizzo email"). Più varianti perché il canale (email/SMS) e
@@ -174,6 +185,29 @@ class TroppeSessioni(AuthError):
     precedenti di questa stessa integrazione) non c'è niente da reinserire
     nel form, va liberata una sessione e riprovato.
     """
+
+
+class AccessoBloccato(AuthError):
+    """E-Distribuzione ha risposto con la pagina antibot di Imperva invece
+    che con quella attesa: l'accesso automatico è bloccato lato server.
+
+    Non è un problema di credenziali né di markup cambiato, e qui non c'è
+    niente da correggere: va segnalato in modo chiaro e riprovato più tardi,
+    senza insistere.
+    """
+
+
+def _verifica_non_bloccato(testo: str) -> None:
+    """Alza AccessoBloccato se la risposta è la pagina antibot."""
+    if _contiene(testo, _MARCATORI_ANTIBOT):
+        raise AccessoBloccato("E-Distribuzione ha risposto con la pagina antibot (Imperva)")
+
+
+async def _leggi_testo(resp: aiohttp.ClientResponse) -> str:
+    """Corpo della risposta, dopo aver escluso la pagina antibot."""
+    testo = await resp.text()
+    _verifica_non_bloccato(testo)
+    return testo
 
 
 class ParsingError(AuthError):
@@ -329,7 +363,7 @@ class AuthClient:
         resp = await _get_following_redirects(
             self._session, OAUTH_AUTHORIZE_URL, params=params, headers=headers
         )
-        login_page_html = await resp.text()
+        login_page_html = await _leggi_testo(resp)
         # Il parametro 'startURL' della pagina su cui atterriamo contiene un
         # token 'source=...' generato dal server al primo hop, che il server
         # pretende di riavere indietro nel campo 'startUrl' del passo
@@ -422,7 +456,7 @@ class AuthClient:
             data=data,
             headers=login_headers,
         ) as resp:
-            raw_text = await resp.text()
+            raw_text = await _leggi_testo(resp)
             try:
                 payload = json.loads(raw_text)
             except json.JSONDecodeError as err:
@@ -465,12 +499,12 @@ class AuthClient:
         headers = {"User-Agent": _MOBILE_USER_AGENT}
 
         resp = await _get_following_redirects(self._session, frontdoor_url, headers=headers)
-        bridge_html = await resp.text()
+        bridge_html = await _leggi_testo(resp)
         resp.close()
 
         otp_form_url = self._estrai_url_redirect_js(bridge_html)
         resp = await _get_following_redirects(self._session, otp_form_url, headers=headers)
-        otp_page_html = await resp.text()
+        otp_page_html = await _leggi_testo(resp)
         resp.close()
         return otp_page_html
 
@@ -549,7 +583,7 @@ class AuthClient:
         headers = {"User-Agent": _MOBILE_USER_AGENT, "Faces-Request": "partial/ajax"}
         url = self._flow.form_action_url or LOGINFLOW_URL
         async with self._session.post(url, data=data, headers=headers) as resp:
-            body = await resp.text()
+            body = await _leggi_testo(resp)
 
         self._verifica_non_troppe_sessioni(body, "otp_send_debug.html")
 
@@ -591,7 +625,7 @@ class AuthClient:
 
         url = self._flow.form_action_url or LOGINFLOW_URL
         async with self._session.post(url, data=data, headers=headers) as resp:
-            body = await resp.text()
+            body = await _leggi_testo(resp)
 
         self._verifica_non_troppe_sessioni(body, "otp_submit_response_debug.html")
 
@@ -619,7 +653,7 @@ class AuthClient:
         scrapa dal testo qui sotto, non navigando."""
         headers = {"User-Agent": _MOBILE_USER_AGENT}
         async with self._session.get(next_url, headers=headers) as resp:
-            return await resp.text()
+            return await _leggi_testo(resp)
 
     async def _estrai_codice_autorizzazione(self, consent_html: str) -> str:
         """Passo 7: trova code/state nella pagina. Se assenti, è la prima
@@ -700,7 +734,7 @@ class AuthClient:
             action_url, data=dati, headers=headers, allow_redirects=False
         ) as resp:
             location = resp.headers.get("Location")
-            body = await resp.text()
+            body = await _leggi_testo(resp)
         return location or body
 
     @staticmethod
@@ -781,7 +815,7 @@ class AuthClient:
             "grant_type": "authorization_code",
         }
         async with self._session.post(OAUTH_TOKEN_URL, data=data) as resp:
-            payload = await resp.json(content_type=None)
+            payload = self._json_token(await _leggi_testo(resp), resp.status)
         return self._tokens_from_payload(payload)
 
     async def async_refresh_access_token(self, refresh_token: str) -> OAuthTokens:
@@ -793,14 +827,25 @@ class AuthClient:
             "client_id": OAUTH_CLIENT_ID,
         }
         async with self._session.post(OAUTH_TOKEN_URL, data=data) as resp:
+            text = await _leggi_testo(resp)
             if resp.status != 200:
-                text = await resp.text()
                 raise AuthError(f"Scambio del refresh_token fallito ({resp.status}): {text[:300]}")
-            payload = await resp.json(content_type=None)
+            payload = self._json_token(text, resp.status)
         # Salesforce non restituisce sempre un nuovo refresh_token al
         # refresh - si mantiene il vecchio se non ne arriva uno nuovo.
         payload.setdefault("refresh_token", refresh_token)
         return self._tokens_from_payload(payload)
+
+    @staticmethod
+    def _json_token(testo: str, status: int) -> dict:
+        """JSON del token endpoint; una pagina HTML al suo posto è un
+        ParsingError (quindi un AuthError), non un ValueError generico."""
+        try:
+            return json.loads(testo)
+        except json.JSONDecodeError as err:
+            raise ParsingError(
+                f"Risposta non-JSON dal token endpoint (status {status}): {testo[:200]!r}"
+            ) from err
 
     @staticmethod
     def _tokens_from_payload(payload: dict) -> OAuthTokens:

@@ -23,7 +23,14 @@ from homeassistant.helpers.aiohttp_client import (
 )
 
 from .api import ApiClient
-from .auth import AuthClient, InvalidCredentials, InvalidOtp, ParsingError, TroppeSessioni
+from .auth import (
+    AccessoBloccato,
+    AuthClient,
+    InvalidCredentials,
+    InvalidOtp,
+    ParsingError,
+    TroppeSessioni,
+)
 from .const import (
     CONF_ORA_RICHIESTA,
     CONF_PODS,
@@ -96,6 +103,9 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except TroppeSessioni:
             _LOGGER.warning("Reinvio OTP rifiutato: troppe sessioni aperte sull'account")
             return "troppe_sessioni", None
+        except AccessoBloccato:
+            _LOGGER.warning("Reinvio OTP: E-Distribuzione ha risposto con la verifica antibot")
+            return "accesso_bloccato", None
         except Exception:  # noqa: BLE001 - vedi commento in async_step_user
             _LOGGER.exception("Reinvio del codice OTP fallito")
             return "cannot_connect", None
@@ -158,6 +168,11 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # successivo a chiederlo.
                 _LOGGER.warning("Login rifiutato: troppe sessioni aperte sull'account")
                 errors["base"] = "troppe_sessioni"
+            except AccessoBloccato:
+                # Prima di ParsingError: la pagina antibot non contiene i
+                # campi attesi, ma il problema non è un cambio di markup.
+                _LOGGER.warning("Login: E-Distribuzione ha risposto con la verifica antibot")
+                errors["base"] = "accesso_bloccato"
             except ParsingError:
                 _LOGGER.exception("Parsing della pagina di login fallito")
                 errors["base"] = "cannot_connect"
@@ -201,6 +216,9 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_otp"
             except TroppeSessioni:
                 errors["base"] = "troppe_sessioni"
+            except AccessoBloccato:
+                _LOGGER.warning("Convalida OTP: E-Distribuzione ha risposto con la verifica antibot")
+                return self.async_abort(reason="accesso_bloccato")
             except ParsingError:
                 # A questo punto l'OTP è già stato accettato da Salesforce
                 # (altrimenti avremmo preso InvalidOtp sopra): il
@@ -382,6 +400,9 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
             tokens = await auth.async_refresh_access_token(
                 self.config_entry.data[CONF_REFRESH_TOKEN]
             )
+        except AccessoBloccato:
+            _LOGGER.warning("Opzioni: E-Distribuzione ha risposto con la verifica antibot")
+            return self.async_abort(reason="accesso_bloccato")
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Refresh del token fallito nelle opzioni")
             return self.async_abort(reason="refresh_failed")

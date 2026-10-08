@@ -508,3 +508,60 @@ class TestGerarchiaEccezioni:
         l'account ad avere troppe sessioni aperte."""
         assert issubclass(auth.TroppeSessioni, auth.AuthError)
         assert not issubclass(auth.TroppeSessioni, auth.InvalidCredentials)
+
+
+# ---------------------------------------------------------------------------
+# Verifica antibot di Imperva al posto delle pagine attese
+# ---------------------------------------------------------------------------
+
+PAGINA_ANTIBOT = (
+    "<html><head><title>Pardon Our Interruption</title></head><body>"
+    "<p>As you were browsing something about your browser made us think you were a bot.</p>"
+    '<script src="/_Incapsula_Resource?SWJIYLWA=abc"></script></body></html>'
+)
+
+
+class _RispostaToken(_RispostaFinta):
+    def __init__(self, body: str, status: int = 200) -> None:
+        super().__init__(body)
+        self.status = status
+
+
+class TestAccessoBloccato:
+    @pytest.mark.parametrize(
+        "pagina",
+        [PAGINA_ANTIBOT, "<html>Request unsuccessful. Incapsula incident ID: 123-456</html>"],
+    )
+    def test_riconosce_la_verifica_e_il_blocco(self, pagina):
+        with pytest.raises(auth.AccessoBloccato):
+            auth._verifica_non_bloccato(pagina)
+
+    def test_lo_script_di_imperva_in_una_pagina_normale_non_e_un_blocco(self):
+        """Imperva inserisce _Incapsula_Resource anche nelle pagine normali
+        di un sito protetto: da solo non deve bloccare un login valido."""
+        auth._verifica_non_bloccato(
+            '<html><title>Login</title><script src="/_Incapsula_Resource?x=1"></script></html>'
+        )
+
+    def test_e_un_auth_error(self):
+        assert issubclass(auth.AccessoBloccato, auth.AuthError)
+
+    async def test_refresh_del_token_bloccato(self):
+        session = _SessioneACoda([_RispostaToken(PAGINA_ANTIBOT)])
+        with pytest.raises(auth.AccessoBloccato):
+            await auth.AuthClient(session).async_refresh_access_token("rt")
+
+    async def test_refresh_con_una_pagina_html_qualunque_e_un_parsing_error(self):
+        session = _SessioneACoda([_RispostaToken("<html>manutenzione</html>")])
+        with pytest.raises(auth.ParsingError):
+            await auth.AuthClient(session).async_refresh_access_token("rt")
+
+    async def test_refresh_riuscito_tiene_il_vecchio_refresh_token(self):
+        session = _SessioneACoda([_RispostaToken('{"access_token": "nuovo"}')])
+        tokens = await auth.AuthClient(session).async_refresh_access_token("rt")
+        assert (tokens.access_token, tokens.refresh_token) == ("nuovo", "rt")
+
+    async def test_invio_otp_bloccato(self):
+        client, _ = _client_su_form_otp(PAGINA_ANTIBOT)
+        with pytest.raises(auth.AccessoBloccato):
+            await client._async_avvia_invio_otp()

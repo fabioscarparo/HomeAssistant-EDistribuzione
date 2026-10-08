@@ -10,7 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 
@@ -124,7 +124,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # di inoltrarle una seconda volta ("has already been setup") e i sensori
     # restano assenti fino al riavvio - succede se E-Distribuzione non
     # risponde proprio mentre Home Assistant si avvia.
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryNotReady:
+        # Con l'accesso bloccato dalla verifica antibot, i nuovi tentativi
+        # di setup di HA (fino a uno ogni 10 minuti) vorrebbero dire
+        # insistere proprio contro quel blocco: il setup si completa e il
+        # coordinator riprova al suo ritmo normale, una volta l'ora.
+        # L'avviso in Riparazioni spiega perché i dati sono fermi.
+        if not coordinator.accesso_bloccato:
+            raise
+        _LOGGER.warning(
+            "E-Distribuzione blocca l'accesso automatico: setup completato, "
+            "nuovo tentativo al prossimo aggiornamento"
+        )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

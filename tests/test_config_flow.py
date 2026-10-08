@@ -18,6 +18,7 @@ from custom_components.edistribuzione import api as edist_api
 from custom_components.edistribuzione import auth as edist_auth
 from custom_components.edistribuzione import config_flow as cf
 from custom_components.edistribuzione.auth import (
+    AccessoBloccato,
     InvalidCredentials,
     InvalidOtp,
     ParsingError,
@@ -85,6 +86,30 @@ async def test_credenziali_non_valide(hass, edist_mocks):
     assert res["type"] == FlowResultType.FORM
     assert res["step_id"] == "user"
     assert res["errors"] == {"base": "invalid_auth"}
+
+
+async def test_login_bloccato_dalla_verifica_antibot(hass, edist_mocks):
+    edist_mocks.auth.async_begin_login.side_effect = AccessoBloccato("antibot")
+    res = await _fino_a_user(hass)
+    res = await hass.config_entries.flow.async_configure(
+        res["flow_id"], {"email": "a@b.it", "password": "x"}
+    )
+    assert res["type"] == FlowResultType.FORM
+    assert res["step_id"] == "user"
+    assert res["errors"] == {"base": "accesso_bloccato"}
+
+
+async def test_convalida_otp_bloccata_dalla_verifica_antibot(hass, edist_mocks):
+    """L'OTP è monouso: con l'accesso bloccato si interrompe con un motivo
+    chiaro, come per gli altri errori dopo la convalida."""
+    edist_mocks.auth.async_submit_otp.side_effect = AccessoBloccato("antibot")
+    res = await _fino_a_user(hass)
+    res = await hass.config_entries.flow.async_configure(
+        res["flow_id"], {"email": "a@b.it", "password": "x"}
+    )
+    res = await hass.config_entries.flow.async_configure(res["flow_id"], {"otp": "12345"})
+    assert res["type"] == FlowResultType.ABORT
+    assert res["reason"] == "accesso_bloccato"
 
 
 async def test_pagina_login_cambiata(hass, edist_mocks):

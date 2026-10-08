@@ -27,12 +27,13 @@ from datetime import date, timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from .api import ApiClient, ApiError
-from .auth import AuthClient, AuthError
+from .auth import AccessoBloccato, AuthClient, AuthError
 from .const import (
     ABBANDONO_CODA_DOPO_GIORNI,
     CONF_DATA_INSTALLAZIONE,
@@ -44,6 +45,7 @@ from .const import (
     DEFAULT_UPDATE_INTERVAL_MINUTES,
     DOMAIN,
     GIORNI_RICONTROLLO,
+    ISSUE_ACCESSO_BLOCCATO,
     MAGNITUDE_IMMESSA,
     MAGNITUDE_PRELEVATA,
     MAGNITUDE_TUTTE,
@@ -133,6 +135,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         )
         self.entry = entry
         self.pods: list[str] = list(entry.data[CONF_PODS])
+        # True finché il rinnovo del token trova la verifica antibot di
+        # E-Distribuzione (vedi _async_ensure_token e async_setup_entry).
+        self.accesso_bloccato = False
         session = async_get_clientsession(hass)
         self._auth = AuthClient(session)
         self._api = ApiClient(session, access_token="")
@@ -164,6 +169,22 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         refresh_token = self.entry.data[CONF_REFRESH_TOKEN]
         try:
             tokens = await self._auth.async_refresh_access_token(refresh_token)
+        except AccessoBloccato as err:
+            # Il refresh_token resta valido e salvato: si riprova al ciclo
+            # successivo, e l'avviso in Riparazioni spiega perché i dati
+            # sono fermi invece di lasciarlo dedurre dai log.
+            self.accesso_bloccato = True
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                ISSUE_ACCESSO_BLOCCATO,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_ACCESSO_BLOCCATO,
+            )
+            raise UpdateFailed(
+                translation_domain=DOMAIN, translation_key="accesso_bloccato"
+            ) from err
         except AuthError as err:
             # Un refresh fallito significa quasi certamente che il
             # refresh_token è stato revocato (cambio password, pulizia
@@ -175,6 +196,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 translation_placeholders={"errore": str(err)},
             ) from err
 
+        # Accesso di nuovo possibile: l'avviso, se c'era, non serve più.
+        self.accesso_bloccato = False
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
         self._api.update_token(tokens.access_token)
 
         if tokens.refresh_token != refresh_token:
