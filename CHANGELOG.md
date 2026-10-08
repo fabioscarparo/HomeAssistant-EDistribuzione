@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+### Changed
+- *Report issue* in Home Assistant now opens this repository's issues, instead of the original
+  repository's.
+
 ## 0.5.1
 ### Fixed
 - Once ignored, the notice about E-Distribuzione blocking automated access stayed hidden even
