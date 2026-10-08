@@ -49,7 +49,7 @@ def test_italiano_e_inglese_hanno_le_stesse_chiavi_e_gli_stessi_segnaposto():
 @pytest.mark.parametrize("lingua", LINGUE)
 def test_nessuna_lineetta_lunga(lingua):
     testo = (CARTELLA / "translations" / f"{lingua}.json").read_text(encoding="utf-8")
-    assert not re.search("[–—]", testo)
+    assert not re.search("[\u2013\u2014]", testo)
 
 
 def test_ogni_translation_key_del_codice_esiste():
