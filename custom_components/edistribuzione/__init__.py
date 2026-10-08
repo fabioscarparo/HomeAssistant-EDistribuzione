@@ -112,12 +112,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_registra_servizi(hass)
     await async_registra_card(hass)
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # async_config_entry_first_refresh SOLLEVA ConfigEntryNotReady se il
-    # primo refresh fallisce: qui va bene, dato che il refresh_token è stato
-    # appena ottenuto nel config flow e un fallimento immediato segnala
-    # verosimilmente un problema reale.
+    # primo refresh fallisce, e HA riprova il setup più tardi. Va fatto PRIMA
+    # di inoltrare le piattaforme: altrimenti al nuovo tentativo HA rifiuta
+    # di inoltrarle una seconda volta ("has already been setup") e i sensori
+    # restano assenti fino al riavvio - succede se E-Distribuzione non
+    # risponde proprio mentre Home Assistant si avvia.
     await coordinator.async_config_entry_first_refresh()
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
