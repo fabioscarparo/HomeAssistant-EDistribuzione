@@ -12,6 +12,7 @@
   <a href="https://hacs.xyz/"><img alt="HACS Custom" src="https://img.shields.io/badge/HACS-Custom-41BDF5?logo=homeassistantcommunitystore&logoColor=fff"></a>
   <a href="https://www.home-assistant.io/"><img alt="Home Assistant 2025.4+" src="https://img.shields.io/badge/Home_Assistant-2025.4%2B-18BCF2?logo=homeassistant&logoColor=fff"></a>
   <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff"></a>
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/License-MIT-333"></a>
 </p>
 
 Custom Home Assistant integration for **E-Distribuzione**, the main Italian
@@ -468,3 +469,7 @@ integration
 which remains the right choice if you also deal with Duereti, Unareti or
 Areti. This repository is dedicated to E-Distribuzione only, with native
 support for separate consumption/injection and a configurable role per POD.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
