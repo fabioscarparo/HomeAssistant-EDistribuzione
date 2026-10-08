@@ -123,6 +123,11 @@ registers it in the frontend by itself: no Lovelace resources to add by
 hand, no second HACS repository. It shows up in the card picker as
 "E-Distribuzione · POD" and has a visual editor.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pod-card-dark.svg">
+  <img alt="E-Distribuzione POD card in the Day, Week, Month and Year views, with simulated data" src="docs/images/pod-card-light.svg">
+</picture>
+
 ```yaml
 type: custom:edistribuzione-pod-card
 pod: it001e12345678     # optional: defaults to the first POD found
