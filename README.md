@@ -3,102 +3,129 @@
 Custom Home Assistant integration for **E-Distribuzione**, the main Italian
 electricity distribution network operator.
 
-For every configured POD it imports **both** energy directions as external
+For every configured **POD** it imports both energy directions as external
 statistics, ready for the Energy Dashboard:
 
-- **consumption** (energy drawn from the grid)
-- **injection** (energy returned to the grid / solar production)
+- **Consumption** - energy drawn from the grid
+- **Injection** - energy returned to the grid, including solar production
 
-Each POD has a configurable **role** (regular/exchange meter, or
-solar/production meter). The role only changes the names shown, not which
-data is downloaded: both directions are always fetched for every POD,
-whatever its role.
+Each POD has a configurable role:
+
+- **Regular / exchange meter** - the main electricity meter
+- **Solar / production meter** - a meter dedicated to photovoltaic production
+
+The role only changes how entities and statistics are named. **Both
+directions are always downloaded for every POD**, whatever its role.
 
 ## Installation
 
-### Before you start
+### Requirements
 
-- Home Assistant 2025.4 or later, with [HACS](https://hacs.xyz) installed.
-- The email and password of your E-Distribuzione customer area, and access
-  to the email or phone where the OTP code arrives.
-- Log out of the official app and website. E-Distribuzione limits the
-  number of concurrent sessions per account, and with too many open it
-  sends no OTP.
+- **Home Assistant 2025.4** or later, with [HACS](https://hacs.xyz)
+  installed
+- The **email and password** of your E-Distribuzione customer area
+- Access to the email address or phone number where the OTP code arrives
 
-### 1. Download with HACS
+> [!IMPORTANT]
+> Log out of the official E-Distribuzione app and website before setting up
+> the integration. E-Distribuzione limits the number of concurrent sessions
+> per account, and with too many open it sends no OTP code.
+
+### Install with HACS
 
 The integration is not in the default HACS store: add it as a custom
 repository.
 
-1. In HACS open the menu (⋮ top right) → **Custom repositories**.
-2. URL `https://github.com/fabioscarparo/HomeAssistant-EDistribuzione`,
-   type **Integration**, then **Add**.
-3. Search for "**E-Distribuzione**" in HACS, open it and select
-   **Download**. The repository has no releases, so HACS offers the latest
-   commit.
-4. Restart Home Assistant: *Settings → System →* power icon (top right) →
-   **Restart Home Assistant**, or use the "Restart required" notice in
-   *Settings → Repairs*.
+1. Open **HACS**, then **⋮ → Custom repositories**.
+2. Add `https://github.com/fabioscarparo/HomeAssistant-EDistribuzione` with
+   type **Integration**.
+3. Search for **E-Distribuzione**, open it and select **Download**. The
+   repository publishes no releases, so HACS installs the latest commit.
+4. Restart Home Assistant: **Settings → System**, power icon (top right) →
+   **Restart Home Assistant**. You can also use the **Restart required**
+   notice in **Settings → Repairs**.
 
-**Manual alternative:** copy `custom_components/edistribuzione/` into the
-`custom_components/` folder of your Home Assistant configuration, then
-restart.
+### Manual installation
 
-**Coming from maurobraggio's repository?** In HACS remove only that
-repository (not the integration in *Devices & services*), then follow the
-steps above. Setup and data are kept, because the integration domain is the
-same.
+Copy `custom_components/edistribuzione/` into the `custom_components/`
+folder of your Home Assistant configuration, then restart Home Assistant.
 
-### 2. Add the integration
+### Migrating from maurobraggio's repository
 
-1. *Settings → Devices & services → **Add integration***, then search for
-   "E-Distribuzione". If it is not listed, reload the page.
+If you are coming from
+[maurobraggio/HomeAssistant-EDistribuzione](https://github.com/maurobraggio/HomeAssistant-EDistribuzione):
+
+1. Remove **only the repository** from HACS.
+2. Do **not** remove the integration from **Settings → Devices & services**.
+3. Add this repository following the steps above.
+
+The integration domain is the same, so the existing setup and data are
+kept.
+
+## Setup
+
+### 1. Add the integration
+
+1. Go to **Settings → Devices & services → Add integration** and search for
+   **E-Distribuzione**. If it does not appear, reload the page.
 2. Enter the email and password of your customer area.
-3. Enter the OTP code you receive by email or SMS. Use only the code that
-   arrives after this step: codes generated in the app or on the website
-   belong to another login session and are always rejected.
-   - No code? Tick **Request a new code**, leave the code field empty and
-     submit the form.
-   - Error about too many concurrent sessions? Log out of the app and the
-     website, wait a few minutes and try again.
-4. If the account has more than one POD, select the ones to monitor. With a
-   single POD this step is skipped.
+3. Enter the OTP code you receive by email or SMS.
 
-### 3. Set the POD role (solar with two meters only)
+> [!NOTE]
+> Only use the code that arrives after submitting your credentials here.
+> Codes generated in the E-Distribuzione app or on the website belong to a
+> different login session and are always rejected.
 
-*Settings → Devices & services → E-Distribuzione → Configure → Meter type
-per POD*: set the production meter to **Solar / production meter**. With an
-exchange meter only there is nothing to change. You can change the role at
-any time.
+- **No OTP code?** Tick **Request a new code**, leave the code field empty
+  and submit the form.
+- **Too many concurrent sessions?** Log out of the official app and website,
+  wait a few minutes and try again.
 
-Next steps: [fetch the history](#fetching-history), set up the
-[Energy Dashboard](#energy-dashboard) and add the
-[POD card](#pod-lovelace-card).
+### 2. Select the PODs
 
-## Fetching history
+If the account has more than one POD, choose the ones to monitor. With a
+single POD this step is skipped.
 
-History is not fetched automatically: right after setup the integration
-imports only the last 3 days, to check the POD and the login. Use the
-**Fetch history** action to import past periods.
+### 3. Configure the POD role
 
-### Run the action
+Only needed with separate exchange and production meters, for example a
+solar system with two meters. Go to **Settings → Devices & services →
+E-Distribuzione → Configure → Meter type per POD** and set the production
+meter to **Solar / production meter**.
 
-1. Go to *Developer tools → Actions* and choose **E-Distribuzione: Fetch
+With an exchange meter only there is nothing to change. The role can be
+changed at any time and does not affect which data is downloaded.
+
+## Fetching historical data
+
+History is not downloaded automatically: right after setup the integration
+imports only the **last 3 days**, to check that the POD and the login work.
+Use the **Fetch history** action to import older data.
+
+### Fetch history from the UI
+
+1. Go to **Developer tools → Actions** and choose **E-Distribuzione: Fetch
    history**.
 2. Fill in the fields:
-   - **Setup / POD**: the "E-Distribuzione" device fetches all configured
+   - **Setup / POD**: the **E-Distribuzione** device fetches all configured
      PODs; a single POD's device limits the fetch to that POD.
-   - **Start date** and **End date**: the end date can be yesterday at the
-     latest.
+   - **Start date** and **End date**: the end date can be **yesterday at
+     the latest**.
 3. Select **Perform action** and wait: six months of data can take a few
    tens of seconds.
 
-Each run covers up to about six months: 181 days is the longest range
-confirmed to work in a single response. For a longer history, run it again
-over consecutive periods. Running it again over the same period is always
-safe: it updates and corrects instead of duplicating.
+### Import range
 
-### In YAML
+Each run covers up to about six months: **181 days** is the longest range
+confirmed to work in a single response. For a longer history, run the
+action over consecutive periods.
+
+Running it again over a period that was already imported is always safe:
+samples are updated instead of duplicated, corrections published by
+E-Distribuzione are applied, and the hourly values and cumulative
+statistics are rebuilt consistently.
+
+### YAML
 
 ```yaml
 action: edistribuzione.recupera_storico
@@ -108,7 +135,9 @@ data:
   data_a: "2026-10-07"
 ```
 
-To find the `device_id`, paste this in *Developer tools → Template*:
+### Finding the `device_id`
+
+Go to **Developer tools → Template** and paste:
 
 ```jinja
 {% for d in integration_entities('edistribuzione') | map('device_id') | unique %}
@@ -118,111 +147,139 @@ To find the `device_id`, paste this in *Developer tools → Template*:
 
 It prints one line per device:
 
-```
+```text
 E-Distribuzione: 4f1c9e0a7b2d4c3e8a6f5b1d2c3e4f50
 POD IT001E12345678: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d
 ```
 
 In a browser you can also open the device page: the ID is the last part of
-the address, after `/config/devices/device/`. If the template prints
-nothing, the integration is not set up yet, or Home Assistant was not
-restarted after installing it.
+the address, after `/config/devices/device/`.
 
-### Checking the result
+If the template prints nothing, the integration is not set up yet, or Home
+Assistant was not restarted after installing it.
 
-- **The action itself:** a green check on the button means at least one POD
-  received data. A red message means nothing was imported, and says why:
-  no data for the period, an end date that is too recent, a start date
-  after the end date, or a range that is too long.
-- **The data:** in the [POD card](#pod-lovelace-card) switch to the Month
-  or Year view and go back with ‹: navigation stops at the first period
-  with data. In the Energy Dashboard, pick a past period.
-- **Day by day:** the number of days received is logged at info level.
-  Turn it on from *Settings → Devices & services → E-Distribuzione → ⋮ →
-  Enable debug logging*, run the action again, then search for
-  `recupero storico` in *Settings → System → Logs* (raw logs, from the ⋮
-  menu). Log messages are in Italian:
+## Checking the imported history
 
-  ```
-  POD IT001E12345678: recupero storico 2026-04-10 - 2026-10-07 completato, 181/181 giorni ricevuti (unione delle due direzioni)
-  ```
+### Action result
 
-  Missing days, if any, are listed in brackets at the end of the line.
-  Select **Disable debug logging** when you are done.
+A green check on the button means that at least one POD received data. A
+red message means that nothing was imported, and says why:
 
-**Last available date** is not a good check for history: it shows the most
-recent day, which was usually there already, and updates on the next
-hourly cycle.
+- no data available for the requested period;
+- end date too recent;
+- start date after the end date;
+- requested range too long.
+
+### POD card and Energy Dashboard
+
+In the [POD card](#pod-lovelace-card), switch to the **Month** or **Year**
+view and go back with **‹**: navigation stops at the first period with
+data. In the Energy Dashboard you can also pick a past period directly.
+
+### Number of days received
+
+The number of days received is logged at info level:
+
+1. **Settings → Devices & services → E-Distribuzione → ⋮ → Enable debug
+   logging**.
+2. Run the history action again.
+3. In **Settings → System → Logs**, switch to the raw logs from the **⋮**
+   menu and search for `recupero storico`. Log messages are in Italian:
+
+   ```text
+   POD IT001E12345678: recupero storico 2026-04-10 - 2026-10-07 completato, 181/181 giorni ricevuti (unione delle due direzioni)
+   ```
+
+   Missing days, if any, are listed in brackets at the end of the line.
+4. Select **Disable debug logging** when you are done.
+
+> [!NOTE]
+> **Last available date** is not a reliable check for a history import: it
+> shows the most recent day, which was usually there already, and updates
+> on the next hourly cycle.
 
 With several PODs the action succeeds as long as at least one of them
-received data. PODs that failed show up as warnings in *Settings → System →
-Logs*, without debug logging.
+received data. PODs that failed show up as warnings in **Settings → System
+→ Logs**, even without debug logging.
 
 ## Daily updates
 
-E-Distribuzione publishes data with a one-day delay. Every day from 19:00
-the integration requests the previous days, always rechecking the last 3 so
-that later corrections are picked up. You can change the hour in
-*Configure → Request time*.
+E-Distribuzione publishes data with a **one-day delay**. Every day from
+**19:00** the integration requests the previous days, always rechecking the
+last **3 days** so that later corrections are imported automatically. You
+can change the hour in **Configure → Request time**.
 
 To check that it is working, open the POD device: the diagnostic sensors
-**Last available date** and **Last day consumption** (or **Last day return
-to grid**) show the most recent imported day.
+show the most recent imported day and its values.
+
+| Meter role | Diagnostic sensors |
+|---|---|
+| Exchange | Last available date, Last day consumption, Last day return to grid |
+| Production | Last available date, Last day production, Last day consumption (technical) |
 
 ## Energy Dashboard
 
-### Quick setup
+### Automatic configuration
 
-Run the action **E-Distribuzione: Configure Energy Dashboard**
-(`edistribuzione.configura_energy_dashboard`) from *Developer tools →
-Actions*. It adds the statistics of every configured POD according to its
-role. It never overwrites or duplicates sources you already have, including
-those added by hand, so it is safe to run again after adding a POD or
+Run **E-Distribuzione: Configure Energy Dashboard**
+(`edistribuzione.configura_energy_dashboard`) from **Developer tools →
+Actions**. It adds the statistics of every configured POD according to its
+role, and never overwrites or duplicates sources that already exist,
+including those added by hand. You can run it again after adding a POD or
 changing a role.
 
-### Manual setup
+> [!WARNING]
+> The action only knows the total consumption series. If you replaced the
+> total with the [F1/F2/F3 bands](#f1--f2--f3-time-bands), do not run it
+> again: it would add the total back and consumption would be counted
+> twice.
 
-*Settings → Dashboards → Energy*. For a system with an exchange meter (M1)
-and a production meter (M2):
+### Manual configuration
 
-| Section | Statistic |
+Go to **Settings → Dashboards → Energy**. For a system with an exchange
+meter (M1) and a production meter (M2):
+
+| Energy Dashboard section | Statistic |
 |---|---|
 | Electricity grid → Grid consumption | `edistribuzione:<pod_m1>_energia` |
 | Electricity grid → Return to grid | `edistribuzione:<pod_m1>_energia_immessa` |
 | Solar panels → Solar production | `edistribuzione:<pod_m2>_energia_immessa` |
 
-`edistribuzione:<pod_m2>_energia` (the consumption of the production meter,
-typically the inverter's standby draw, a few tenths of a kWh per month)
-stays available but does not belong in any dashboard section.
+`edistribuzione:<pod_m2>_energia` is the consumption of the production
+meter itself, typically the inverter's standby draw, a few tenths of a kWh
+per month. It stays available but does not belong in any dashboard section.
 
-Self-consumption and total home consumption are calculated automatically by
-Home Assistant from production, injection and consumption: no extra sensors
+Self-consumption and total home consumption are calculated by Home
+Assistant from production, injection and grid consumption: no extra sensors
 are needed.
 
 ## F1 / F2 / F3 time bands
 
-For the **consumption** direction the integration also writes three series,
-one per ARERA time band, calculated from the same 15-minute samples:
+For the **consumption** direction the integration also writes three
+statistics, one per ARERA time band, calculated from the same 15-minute
+samples as the total:
 
-| Statistic                         | Time band                                                       |
-| --------------------------------- | --------------------------------------------------------------- |
-| `edistribuzione:<pod>_energia_f1` | Mon-Fri 08:00-19:00                                             |
-| `edistribuzione:<pod>_energia_f2` | Mon-Fri 07:00-08:00 and 19:00-23:00, Saturday 07:00-23:00       |
-| `edistribuzione:<pod>_energia_f3` | nights (23:00-07:00), Sundays and national holidays all day     |
+| Statistic | Time band |
+|---|---|
+| `edistribuzione:<pod>_energia_f1` | Monday-Friday 08:00-19:00 |
+| `edistribuzione:<pod>_energia_f2` | Monday-Friday 07:00-08:00 and 19:00-23:00, Saturday 07:00-23:00 |
+| `edistribuzione:<pod>_energia_f3` | Monday-Saturday 23:00-07:00, Sundays and national holidays all day |
 
 The three series share the hourly timestamps of the total series, and hour
 by hour F1 + F2 + F3 = total. Like the total, they are recalculated from
-`edistribuzione_curve.db`: on the first import after the update they already
-cover all the history downloaded so far, and they follow corrections on
-their own.
+`edistribuzione_curve.db`: on the first import after updating the
+integration they already cover all the history downloaded so far, and they
+follow corrections on their own.
 
-Classification always uses Italian time (Europe/Rome), whatever time zone
-Home Assistant is configured with. Holidays are the 11 traditional ones
-(Easter Monday included, local patron saints excluded) plus October 4 from
-2026 on (Law 151/2025). If the official October 2027 readings say
+### Time zone and holidays
+
+Classification always uses Italian time (`Europe/Rome`), whatever time zone
+Home Assistant is configured with. Holidays are the 11 traditional national
+ones (Easter Monday included, local patron saints excluded) plus October 4
+from 2026 on (Law 151/2025). If the official October 2027 readings say
 otherwise, set `SAN_FRANCESCO_FESTIVO = False` in `fasce.py`.
 
-**Chart by time band** (statistics graph card):
+### Chart by time band
 
 ```yaml
 type: statistics-graph
@@ -238,17 +295,23 @@ entities:
   - edistribuzione:<pod>_energia_f3
 ```
 
-**Energy Dashboard:** instead of the total series you can add the three
-bands as three separate grid consumption sources, each with its own price.
-Never add the total *and* the bands together, or consumption is counted
-twice. `configura_energy_dashboard` still adds the total only.
+### F1/F2/F3 in the Energy Dashboard
+
+Instead of the total consumption you can add the three bands as three
+separate grid consumption sources, each with its own price.
+
+> [!IMPORTANT]
+> Never add the total *and* the bands together, or consumption is counted
+> twice. For the same reason, do not run **Configure Energy Dashboard**
+> after switching to the bands: it adds the total only.
 
 ## POD Lovelace card
 
-The integration ships a card (`custom:edistribuzione-pod-card`) and
-registers it in the frontend by itself: no Lovelace resources to add by
-hand, no second HACS repository. It shows up in the card picker as
-"E-Distribuzione · POD" and has a visual editor.
+The integration ships a Lovelace card (`custom:edistribuzione-pod-card`)
+built to look and behave like Home Assistant's own cards. It registers
+itself: no Lovelace resource to add by hand, no second HACS repository. It
+appears in the card picker as **E-Distribuzione · POD** and has a visual
+editor.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/pod-card-dark.svg">
@@ -257,13 +320,14 @@ hand, no second HACS repository. It shows up in the card picker as
 
 ### Adding the card
 
-1. Open a dashboard and select the pencil (**Edit dashboard**).
-2. Select **Add card**, search for "E-Distribuzione · POD" and save. With no
-   options the card shows the first POD it finds.
-3. If the card is not in the list, reload the page, or close and reopen the
-   companion app: it may still have the previous frontend cached.
+1. Open a dashboard and select **Edit dashboard** (pencil).
+2. Select **Add card** and search for **E-Distribuzione · POD**.
+3. Add and save the card. With no options it shows the first POD found.
 
-### Options
+If the card is not in the picker, reload the page, or close and reopen the
+companion app: it may still have the previous frontend cached.
+
+### Configuration
 
 ```yaml
 type: custom:edistribuzione-pod-card
@@ -274,59 +338,80 @@ period: month           # day | week | month | year
 show_injection: true
 ```
 
-It shows the period's consumption and injection, the F1/F2/F3 split and a
-stacked bar chart by time band (hours in the day view, days in the week and
-month views, months in the year view), with navigation limited to the
-period that has data. It only uses Home Assistant theme tokens (energy
-colors, typography, radii, tile icon, control select, chart theme), so it
-follows light/dark mode and custom themes, as well as the language, number
-format, time format and first day of the week set in the user profile.
+### Features
+
+The card shows the period's consumption and injection, the F1/F2/F3 split
+and a stacked bar chart by time band:
+
+| View | Bars |
+|---|---|
+| Day | Hours |
+| Week | Days |
+| Month | Days |
+| Year | Months |
+
+Navigation is limited to the periods that have data. The card only uses
+Home Assistant theme tokens (energy colors, typography, radii, tile icon,
+control select, chart theme), so it follows light/dark mode and custom
+themes, as well as the language, number format, time format and first day
+of the week set in the user profile.
 
 ## Languages
 
 The integration speaks Italian and English. Entity names, setup and options
 dialogs, actions and error messages follow the language of each user's
-profile, with English for any other language. Home Assistant has no
-translation mechanism for device models and external statistic names, so
-those follow the server language (*Settings → System → General*): after a
-change, device models update on the next restart and statistic names on the
-next import.
+profile, with English for any other language.
 
-## Architecture: 15-minute data as the source of truth
+Home Assistant has no translation mechanism for device models and external
+statistic names, so those follow the server language (**Settings → System
+→ General**): after a change, device models update on the next restart and
+statistic names on the next import.
+
+## Architecture
+
+### 15-minute data as the source of truth
 
 The 15-minute samples returned by E-Distribuzione (96 per day) are not
 aggregated and thrown away: they first go into the integration's own SQLite
-database (`edistribuzione_curve.db`, in the Home Assistant configuration
-folder; a separate file, never the Recorder database). Only then are the
-hourly buckets and the cumulative sum for the Energy Dashboard recalculated
-from the samples actually stored:
+database, `edistribuzione_curve.db`, in the Home Assistant configuration
+folder and separate from the Recorder database. The hourly buckets, the
+cumulative sums for the Energy Dashboard and the F1/F2/F3 series are then
+recalculated from the samples actually stored:
 
+```text
+E-Distribuzione API (15')
+        ↓
+raw storage (upsert)
+        ↓
+hourly buckets + cumulative sums
+        ↓
+Energy Dashboard
 ```
-E-Distribuzione API (15')  ->  raw storage (upsert)  ->  hourly buckets + sum  ->  Energy Dashboard
-```
 
-This makes every import **idempotent and self-correcting**: if
-E-Distribuzione later corrects a sample that was already downloaded (it
-happens), a new `recupera_storico` over the same period overwrites that
-sample (same POD, same direction, same instant) instead of duplicating it,
-and recalculates from scratch both the affected hour and all the following
-cumulative sums. The final result does not depend on the order in which
-history, retries and corrections arrived.
+### Idempotent and self-correcting imports
 
-For the same reasons, the automatic daily cycle does not request only the
-previous day: it always rechecks the last `GIORNI_RICONTROLLO` days (3 by
-default, in a single request per direction, not one per day), so a recent
-correction is picked up automatically without running `recupera_storico` by
-hand.
+E-Distribuzione sometimes corrects samples that were already downloaded. A
+new `recupera_storico` over the same period overwrites those samples
+(same POD, same direction, same instant) instead of duplicating them, then
+recalculates the affected hour and all the following cumulative sums. The
+final result does not depend on the order in which history, retries and
+corrections arrived.
 
-## Verifying the protocol before trusting the data
+For the same reason the daily cycle does not request only the previous day:
+it always rechecks the last `GIORNI_RICONTROLLO` days (3 by default, in a
+single request per direction), so recent corrections are picked up without
+running `recupera_storico` by hand.
+
+## Verifying the protocol
+
+Before trusting the data, you can check the login and data protocol with:
 
 ```bash
 pip install -r requirements_test.txt
 python scripts/verify_login.py
 ```
 
-The script logs in (email/password/OTP), lists the account's PODs and
+The script logs in (email, password and OTP), lists the account's PODs and
 probes several `magnitude` candidates on the data endpoint, comparing the
 totals to find out which one returns injected energy. If a candidate turns
 out to be correct, update **only** `MAGNITUDE_IMMESSA` in
@@ -345,7 +430,8 @@ python3 -m venv .venv
 
 This is a fork of
 [maurobraggio/HomeAssistant-EDistribuzione](https://github.com/maurobraggio/HomeAssistant-EDistribuzione)
-that adds the F1/F2/F3 time bands and the POD card.
+that adds the F1/F2/F3 time bands, the POD card and the English
+translation.
 
 The protocol (OAuth2 + PKCE + OTP login via Salesforce, MuleSoft REST
 client for the data) was reverse-engineered for the multi-distributor
