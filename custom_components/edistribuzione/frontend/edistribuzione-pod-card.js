@@ -1017,7 +1017,7 @@ const STILE = `
 
   .chart { position: relative; min-height: 196px; margin: 0 -4px; touch-action: pan-y; }
   .chart.loading svg { opacity: 0.4; transition: opacity 120ms ease-in-out; }
-  svg { display: block; overflow: visible; font-family: var(--ha-font-family-body, Roboto, Noto, sans-serif); }
+  svg { display: block; overflow: visible; }
   svg text { font-size: 12px; fill: var(--primary-text-color); }
   svg .ylab { text-anchor: end; }
   svg .xlab { text-anchor: middle; }
