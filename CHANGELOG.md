@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1
+### Fixed
+- Once ignored, the notice about E-Distribuzione blocking automated access stayed hidden even
+  after reloading the integration while the block lasted. It now shows again after every
+  reload or restart as long as access is blocked, and disappears when the integration is
+  removed.
+
 ## 0.5.0
 First release of this fork of
 [maurobraggio/HomeAssistant-EDistribuzione](https://github.com/maurobraggio/HomeAssistant-EDistribuzione).
