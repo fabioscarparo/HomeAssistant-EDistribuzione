@@ -39,7 +39,7 @@ directions are always downloaded for every POD**, whatever its role.
 ### Requirements
 
 - **Home Assistant 2025.4** or later, with [HACS](https://hacs.xyz)
-  installed
+  installed; the integration's icon shows from Home Assistant 2026.3
 - The **email and password** of your E-Distribuzione customer area
 - Access to the email address or phone number where the OTP code arrives
 
