@@ -79,3 +79,27 @@ async def test_altri_errori_all_avvio_restano_un_nuovo_tentativo_di_setup(hass):
     entry, _ = await _setup_con_rinnovo(hass, AuthError("refresh_token revocato"))
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is None
+
+
+async def test_avviso_ignorato_ricompare_al_ricaricamento_se_il_blocco_continua(hass):
+    """HA lascia nascosto un avviso ignorato anche se viene ricreato: dopo
+    un ricaricamento con l'accesso ancora bloccato deve tornare visibile."""
+    entry, auth = await _setup_con_rinnovo(hass, AccessoBloccato("antibot"))
+    registro = ir.async_get(hass)
+    ir.async_ignore_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO, True)
+    assert registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO).dismissed_version
+
+    with patch("custom_components.edistribuzione.coordinator.AuthClient", return_value=auth):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    avviso = registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO)
+    assert avviso is not None
+    assert avviso.dismissed_version is None
+
+
+async def test_rimuovendo_l_integrazione_sparisce_anche_l_avviso(hass):
+    entry, _ = await _setup_con_rinnovo(hass, AccessoBloccato("antibot"))
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is None

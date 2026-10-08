@@ -13,8 +13,9 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import issue_registry as ir
 
-from .const import DOMAIN
+from .const import DOMAIN, ISSUE_ACCESSO_BLOCCATO
 from .coordinator import EdistribuzioneCoordinator
 from .energy_dashboard import async_configura_energy_dashboard
 from .lovelace_card import async_registra_card
@@ -118,6 +119,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_registra_servizi(hass)
     await async_registra_card(hass)
+    # HA tiene nascosto un avviso ignorato anche quando viene ricreato con lo
+    # stesso nome. Azzerandolo qui, a ogni avvio o ricaricamento, il primo
+    # aggiornamento lo ricrea visibile se l'accesso è ancora bloccato:
+    # ignorarlo lo nasconde solo fino al prossimo ricaricamento.
+    ir.async_delete_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
     # async_config_entry_first_refresh SOLLEVA ConfigEntryNotReady se il
     # primo refresh fallisce, e HA riprova il setup più tardi. Va fatto PRIMA
     # di inoltrare le piattaforme: altrimenti al nuovo tentativo HA rifiuta
@@ -151,6 +157,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN].pop(entry.entry_id, None)
 
     if not hass.data[DOMAIN]:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
         hass.services.async_remove(DOMAIN, SERVICE_RECUPERA_STORICO)
         hass.services.async_remove(DOMAIN, SERVICE_CONFIGURA_ENERGY_DASHBOARD)
 
