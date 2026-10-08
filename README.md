@@ -105,6 +105,9 @@ kept.
   Installations already set up show the same notice in **Settings →
   Repairs**, and resume on their own once access works again.
 
+Other problems, or ideas? Please report them in the
+[issues](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues).
+
 ### 2. Select the PODs
 
 If the account has more than one POD, choose the ones to monitor. With a
