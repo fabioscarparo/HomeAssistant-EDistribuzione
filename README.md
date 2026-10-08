@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/commits/main"><img alt="Version" src="https://img.shields.io/github/manifest-json/v/fabioscarparo/HomeAssistant-EDistribuzione?filename=custom_components%2Fedistribuzione%2Fmanifest.json&label=Version&color=5CC300"></a>
+  <a href="https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/fabioscarparo/HomeAssistant-EDistribuzione?label=Release&color=5CC300"></a>
   <a href="https://hacs.xyz/"><img alt="HACS Custom" src="https://img.shields.io/badge/HACS-Custom-41BDF5?logo=homeassistantcommunitystore&logoColor=fff"></a>
   <a href="https://www.home-assistant.io/"><img alt="Home Assistant 2025.4+" src="https://img.shields.io/badge/Home_Assistant-2025.4%2B-18BCF2?logo=homeassistant&logoColor=fff"></a>
   <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff"></a>
@@ -56,11 +56,13 @@ repository.
 1. Open **HACS**, then **⋮ → Custom repositories**.
 2. Add `https://github.com/fabioscarparo/HomeAssistant-EDistribuzione` with
    type **Integration**.
-3. Search for **E-Distribuzione**, open it and select **Download**. The
-   repository publishes no releases, so HACS installs the latest commit.
+3. Search for **E-Distribuzione**, open it and select **Download**. HACS
+   installs the latest release and lets you know when a new one is out.
 4. Restart Home Assistant: **Settings → System**, power icon (top right) →
    **Restart Home Assistant**. You can also use the **Restart required**
    notice in **Settings → Repairs**.
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ### Manual installation
 
