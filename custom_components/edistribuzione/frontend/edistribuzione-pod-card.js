@@ -560,9 +560,24 @@ class EdistribuzionePodCard extends HTMLElement {
   _etichettaAsse(i, stretta) {
     const { iv } = this._dati;
     const t = new Date(iv.slot[i]);
-    if (iv.period === "hour") return this._data(t, { hour: "2-digit", minute: "2-digit" });
+    if (iv.period === "hour") {
+      // Con l'orologio a 12 ore "3 AM" invece di "03:00 AM": più corto, come
+      // le etichette dei grafici nativi.
+      return this._dodiciOre()
+        ? this._data(t, { hour: "numeric" })
+        : this._data(t, { hour: "2-digit", minute: "2-digit" });
+    }
     if (iv.period === "day") return this._vista === "week" ? this._data(t, { weekday: "short" }) : this._data(t, { day: "numeric" });
     return this._data(t, { month: stretta ? "narrow" : "short" });
+  }
+
+  _dodiciOre() {
+    const ciclo = new Intl.DateTimeFormat(this._hass?.locale?.language || "it", {
+      timeZone: this._tz, hour: "numeric",
+      ...(this._hass?.locale?.time_format === "12" ? { hourCycle: "h12" }
+        : this._hass?.locale?.time_format === "24" ? { hourCycle: "h23" } : {}),
+    }).resolvedOptions().hourCycle;
+    return ciclo === "h11" || ciclo === "h12";
   }
 
   // --- Colori dal tema corrente ----------------------------------------------
@@ -815,7 +830,10 @@ class EdistribuzionePodCard extends HTMLElement {
 
     // etichette dell'asse X senza sovrapposizioni
     const stretta = iv.period === "month" && slotW < 30;
-    const larghezzaEtichetta = iv.period === "hour" ? 40 : iv.period === "month" ? (stretta ? 12 : 30) : this._vista === "week" ? 30 : 22;
+    // Larghezza stimata dall'etichetta più lunga, così il passo si adatta a
+    // lingua e formato orario (es. "12 PM", "mer", "Sep") senza sovrapposizioni.
+    const caratteriMax = Math.max(...iv.slot.map((_, i) => this._etichettaAsse(i, stretta).length));
+    const larghezzaEtichetta = caratteriMax * 6.5 + 8;
     const passiPossibili = iv.period === "hour" ? [1, 2, 3, 4, 6, 12] : iv.period === "day" ? [1, 2, 3, 5, 7, 10] : [1, 2, 3, 6];
     const passoX = passiPossibili.find((p) => (slotW * p) >= larghezzaEtichetta) || passiPossibili[passiPossibili.length - 1];
     for (let i = 0; i < n; i += passoX) {
