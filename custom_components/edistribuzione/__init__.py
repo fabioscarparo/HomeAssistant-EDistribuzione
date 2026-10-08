@@ -17,6 +17,7 @@ from homeassistant.helpers import device_registry as dr
 from .const import DOMAIN
 from .coordinator import EdistribuzioneCoordinator
 from .energy_dashboard import async_configura_energy_dashboard
+from .lovelace_card import async_registra_card
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = EdistribuzioneCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_registra_servizi(hass)
+    await async_registra_card(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     # async_config_entry_first_refresh SOLLEVA ConfigEntryNotReady se il
     # primo refresh fallisce: qui va bene, dato che il refresh_token è stato

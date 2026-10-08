@@ -103,6 +103,30 @@ le tre fasce come tre consumi dalla rete distinti, ciascuno col proprio
 prezzo. Mai la totale *e* le fasce insieme: il prelievo verrebbe contato due
 volte. `configura_energy_dashboard` continua ad aggiungere solo la totale.
 
+## Card Lovelace del POD
+
+L'integrazione porta con sé una card (`custom:edistribuzione-pod-card`) e
+la registra da sola nel frontend: niente risorse Lovelace da aggiungere a
+mano, niente secondo repository HACS. Compare nel selettore delle card come
+"E-Distribuzione · POD" e ha un editor visuale.
+
+```yaml
+type: custom:edistribuzione-pod-card
+pod: it001e12345678     # opzionale: senza, usa il primo POD trovato
+name: Contatore         # opzionale
+icon: mdi:transmission-tower
+period: month           # day | week | month | year
+show_injection: true
+```
+
+Mostra prelievo e immissione del periodo, la ripartizione F1/F2/F3 e un
+grafico a barre impilate per fascia (ore nella vista giorno, giorni in
+settimana e mese, mesi nell'anno), con navigazione limitata al periodo in
+cui esistono dati. Usa solo i token del tema di Home Assistant (colori
+energia, tipografia, raggi, tile icon, control select, tema dei grafici),
+quindi segue tema chiaro/scuro e temi personalizzati, oltre a lingua,
+formato numeri, formato orario e primo giorno della settimana del profilo.
+
 ## Architettura: 15 minuti come source of truth
 
 I campioni a 15 minuti restituiti da E-Distribuzione (96/giorno) non vengono
