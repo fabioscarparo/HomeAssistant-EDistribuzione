@@ -1,0 +1,202 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sign in to E-Distribuzione",
+        "description": "Use the same credentials as the official E-Distribuzione app or website. After signing in you will be asked for an OTP code, received by email or SMS: it will be sent by this setup, do not use codes generated on the website or in the app. If you have the app or the website open, log out there first: E-Distribuzione limits the number of concurrent sessions per account.{pod_correnti}",
+        "data": {
+          "email": "Email",
+          "password": "Password"
+        }
+      },
+      "otp": {
+        "title": "OTP code",
+        "description": "Enter the OTP code you received by email or SMS. {avviso}",
+        "data": {
+          "otp": "OTP code",
+          "richiedi_nuovo_codice": "Request a new code (leave the field above empty)"
+        }
+      },
+      "pod": {
+        "title": "Select POD",
+        "description": "You can select more than one POD if you want to monitor several of them with this same setup.",
+        "data": {
+          "pods": "POD"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid email or password",
+      "cannot_connect": "Unable to reach E-Distribuzione",
+      "invalid_otp": "Wrong or expired OTP code. It must be the code sent by this setup: one generated on the website or in the app belongs to another login session and is always rejected.",
+      "otp_mancante": "Enter the OTP code, or tick \"Request a new code\" to have a new one sent",
+      "troppe_sessioni": "E-Distribuzione refused the login because the account has too many concurrent sessions open. Log out of the official app and website, wait a few minutes and try again: in this state no OTP code is sent.",
+      "nessun_pod_selezionato": "Select at least one POD"
+    },
+    "abort": {
+      "reauth_successful": "Credentials updated successfully",
+      "no_pods_found": "No POD found for this account",
+      "supplies_failed": "Unexpected error while retrieving the PODs from the account. Start the setup again from the beginning (login and OTP included).",
+      "otp_exchange_failed": "The OTP code was accepted but completing the login failed. Start the setup again from the beginning (login and OTP included)."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "E-Distribuzione options",
+        "menu_options": {
+          "tipo_pod": "Meter type per POD",
+          "aggiungi_pod": "Add POD",
+          "rimuovi_pod": "Remove POD",
+          "orario": "Request time"
+        }
+      },
+      "tipo_pod": {
+        "title": "Meter type per POD",
+        "description": "A+/A- describe what E-Distribuzione measures (consumption/injection): both are always fetched for every POD. The type below only describes the role of that meter in your system, and only changes the names shown in the Energy Dashboard. You can change it at any time, no new import needed."
+      },
+      "aggiungi_pod": {
+        "title": "Add POD",
+        "description": "PODs currently configured: {pod_correnti}. Below are the ones available on your account that are not yet part of this setup.",
+        "data": {
+          "pods_da_aggiungere": "PODs to add"
+        }
+      },
+      "rimuovi_pod": {
+        "title": "Remove POD",
+        "description": "Select the PODs to remove. Historical data already imported into the external statistics is not deleted.",
+        "data": {
+          "pods_da_rimuovere": "PODs to remove"
+        }
+      },
+      "orario": {
+        "title": "Request time",
+        "description": "Local hour (0-23) from which to request the previous day's curve. Current: {ora_attuale}:00.",
+        "data": {
+          "ora_richiesta": "Hour"
+        }
+      }
+    },
+    "error": {
+      "non_puoi_rimuoverli_tutti": "You cannot remove all PODs from here: remove the integration itself if you want to empty it completely"
+    },
+    "abort": {
+      "nessun_pod": "There are no configured PODs to remove",
+      "nessun_pod_selezionato": "Select at least one POD to add",
+      "nessun_pod_da_aggiungere": "All the PODs on your account are already configured here",
+      "refresh_failed": "Unable to renew access to E-Distribuzione. Try again later; if the problem persists a new login may be needed (remove and set up the integration again).",
+      "supplies_failed": "Unexpected error while retrieving the PODs from the account. Try again later."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "pod_configurati": {
+        "name": "Configured PODs",
+        "state_attributes": {
+          "pods": {
+            "name": "PODs"
+          }
+        }
+      },
+      "ultima_data_disponibile": {
+        "name": "Last available date"
+      },
+      "prelievo_ultimo_giorno": {
+        "name": "Last day consumption",
+        "state_attributes": {
+          "giorno": {
+            "name": "Day"
+          }
+        }
+      },
+      "immissione_ultimo_giorno": {
+        "name": "Last day return to grid",
+        "state_attributes": {
+          "giorno": {
+            "name": "Day"
+          }
+        }
+      },
+      "produzione_ultimo_giorno": {
+        "name": "Last day production",
+        "state_attributes": {
+          "giorno": {
+            "name": "Day"
+          }
+        }
+      },
+      "prelievo_tecnico_ultimo_giorno": {
+        "name": "Last day consumption (technical)",
+        "state_attributes": {
+          "giorno": {
+            "name": "Day"
+          }
+        }
+      }
+    }
+  },
+  "selector": {
+    "tipo_pod": {
+      "options": {
+        "scambio": "Regular / exchange meter",
+        "produzione": "Solar / production meter"
+      }
+    }
+  },
+  "services": {
+    "recupera_storico": {
+      "name": "Fetch history",
+      "description": "Requests both energy directions (consumption and injection) for a past period from E-Distribuzione and imports them, with a single request per direction for the whole period (confirmed to work for up to 181 days in one response). History is not fetched automatically: you decide when and how much to fetch. For longer periods, repeat the action over consecutive ranges.",
+      "fields": {
+        "device_id": {
+          "name": "Setup / POD",
+          "description": "Choose the device to fetch history for. The \"E-Distribuzione\" (account) device fetches all the PODs of the setup together; a single POD's device limits the fetch to that POD."
+        },
+        "data_da": {
+          "name": "Start date",
+          "description": "First day of the period to fetch."
+        },
+        "data_a": {
+          "name": "End date",
+          "description": "Last day of the period to fetch. Data is available with a one-day delay, so yesterday at the latest."
+        }
+      }
+    },
+    "configura_energy_dashboard": {
+      "name": "Configure Energy Dashboard",
+      "description": "Adds the statistics of all configured PODs to the Energy Dashboard, according to the role assigned to each one (exchange -> grid source, production -> solar source). Idempotent action: it does not overwrite or duplicate sources that already exist (including those configured by hand), safe to run again after adding a POD or changing a role."
+    }
+  },
+  "exceptions": {
+    "dispositivo_non_trovato": {
+      "message": "Device not found (device_id={device_id})."
+    },
+    "dispositivo_senza_configurazione": {
+      "message": "The selected device does not belong to any active setup."
+    },
+    "nessuna_istanza": {
+      "message": "No E-Distribuzione instance configured."
+    },
+    "pod_non_configurato": {
+      "message": "POD '{pod}' is not configured on this instance. Configured PODs: {pods}."
+    },
+    "date_invertite": {
+      "message": "The start date ({data_da}) is after the end date ({data_a})."
+    },
+    "data_fine_troppo_recente": {
+      "message": "The end date ({data_a}) is too recent: data is currently assumed to be available with at least a one-day delay, so up to {ultimo_utile} at the latest."
+    },
+    "intervallo_troppo_ampio": {
+      "message": "A range of {giorni} days is too wide for a single request (courtesy limit: {massimo} days, about 6 months). Repeat the action over shorter periods."
+    },
+    "nessun_dato_importato": {
+      "message": "No data imported for the period {data_da} - {data_a}. {dettagli}"
+    },
+    "refresh_token_fallito": {
+      "message": "Token refresh failed: {errore}"
+    },
+    "errore_import_pod": {
+      "message": "Error importing the period for POD {pod}: {errore}"
+    }
+  }
+}

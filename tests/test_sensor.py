@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import date
 from types import SimpleNamespace
 
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.edistribuzione import sensor as s
@@ -21,12 +22,13 @@ def _entry(hass=None, pods=(POD,)):
     return entry
 
 
-def _coord(by_pod=None, pods=(POD,), tipo_pod=TIPO_POD_DEFAULT):
+def _coord(by_pod=None, pods=(POD,), tipo_pod=TIPO_POD_DEFAULT, lingua="it"):
     return SimpleNamespace(
         data={"by_pod": by_pod} if by_pod is not None else None,
         pods=list(pods),
         entry=None,
         tipo_pod=lambda pod: tipo_pod,
+        lingua=lingua,
     )
 
 
@@ -70,17 +72,39 @@ def test_consumo_giorno_immessa_legge_la_chiave_propria():
     assert sensore.native_value == 9.876
 
 
-def test_consumo_giorno_etichetta_dipende_dal_ruolo():
-    coord_scambio = _coord(tipo_pod="scambio")
-    coord_produzione = _coord(tipo_pod="produzione")
-    assert s.ConsumoGiornoSensor._etichetta(coord_scambio, POD, immessa=True) == "Immissione ultimo giorno"
-    assert s.ConsumoGiornoSensor._etichetta(coord_produzione, POD, immessa=True) == "Produzione ultimo giorno"
+@pytest.mark.parametrize(
+    ("tipo_pod", "immessa", "chiave"),
+    [
+        ("scambio", False, "prelievo_ultimo_giorno"),
+        ("scambio", True, "immissione_ultimo_giorno"),
+        ("produzione", False, "prelievo_tecnico_ultimo_giorno"),
+        ("produzione", True, "produzione_ultimo_giorno"),
+    ],
+)
+def test_consumo_giorno_nome_dipende_dal_ruolo(tipo_pod, immessa, chiave):
+    sensore = s.ConsumoGiornoSensor(_coord(tipo_pod=tipo_pod), _entry(), POD, immessa=immessa)
+    assert sensore.translation_key == chiave
+    assert sensore._attr_has_entity_name
+
+
+@pytest.mark.parametrize(
+    ("lingua", "account", "pod"),
+    [("it", "Account API", "Punto di prelievo"), ("en", "API account", "Withdrawal point")],
+)
+def test_modello_dispositivo_segue_la_lingua_del_server(lingua, account, pod):
+    coord = _coord(lingua=lingua)
+    assert s.PodConfiguratiSensor(coord, _entry()).device_info["model"] == account
+    assert s.UltimaDataDisponibileSensor(coord, _entry(), POD).device_info["model"] == pod
 
 
 async def test_build_entities_conta_account_piu_tre_per_pod(hass):
     entry = _entry(hass, pods=[POD, "IT002"])
     coord = SimpleNamespace(
-        data=None, pods=[POD, "IT002"], entry=entry, tipo_pod=lambda pod: TIPO_POD_DEFAULT
+        data=None,
+        pods=[POD, "IT002"],
+        entry=entry,
+        tipo_pod=lambda pod: TIPO_POD_DEFAULT,
+        lingua="it",
     )
     entità = s.build_entities(hass, coord)
     # 1 sull'account + 3 per ciascuno dei 2 POD (ultima data + prelevata + immessa)

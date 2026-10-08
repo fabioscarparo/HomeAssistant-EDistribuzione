@@ -41,9 +41,18 @@ the OTP code you receive by email or SMS during setup.
 
 ## POD role
 
-*Settings → Devices & services → E-Distribuzione → Configure → Tipo di
-contatore per POD* (meter type per POD; the integration's own dialogs are
-currently in Italian only). You can change it at any time.
+*Settings → Devices & services → E-Distribuzione → Configure → Meter type
+per POD.* You can change it at any time.
+
+## Languages
+
+The integration speaks Italian and English. Entity names, setup and options
+dialogs, actions and error messages follow the language of each user's
+profile, with English for any other language. Home Assistant has no
+translation mechanism for device models and external statistic names, so
+those follow the server language (*Settings → System → General*): after a
+change, device models update on the next restart and statistic names on the
+next import.
 
 ## Energy Dashboard
 

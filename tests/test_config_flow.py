@@ -139,6 +139,7 @@ async def test_otp_form_vuoto_chiede_il_codice(hass, edist_mocks):
 
 
 async def test_richiesta_nuovo_otp(hass, edist_mocks):
+    hass.config.language = "it"
     res = await _fino_a_user(hass)
     res = await hass.config_entries.flow.async_configure(
         res["flow_id"], {"email": "a@b.it", "password": "x"}
@@ -153,14 +154,21 @@ async def test_richiesta_nuovo_otp(hass, edist_mocks):
     assert "nuovo codice" in res["description_placeholders"]["avviso"]
 
 
-async def test_avviso_se_invio_otp_non_confermato(hass, edist_mocks):
+@pytest.mark.parametrize(
+    ("lingua", "atteso"),
+    [("it", "non ha confermato"), ("en", "did not confirm"), ("de", "did not confirm")],
+)
+async def test_avviso_se_invio_otp_non_confermato(hass, edist_mocks, lingua, atteso):
+    """L'avviso è un description_placeholder, che HA non traduce: segue la
+    lingua del server, con l'inglese per le lingue non supportate."""
+    hass.config.language = lingua
     edist_mocks.auth.otp_invio_confermato = False
     res = await _fino_a_user(hass)
     res = await hass.config_entries.flow.async_configure(
         res["flow_id"], {"email": "a@b.it", "password": "x"}
     )
     assert res["step_id"] == "otp"
-    assert "non ha confermato" in res["description_placeholders"]["avviso"]
+    assert atteso in res["description_placeholders"]["avviso"]
 
 
 async def test_otp_parsing_fallito_abortisce(hass, edist_mocks):

@@ -35,6 +35,7 @@ from .const import (
     TIPO_POD_PRODUZIONE,
     TIPO_POD_SCAMBIO,
 )
+from .testi import testo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,21 +46,6 @@ STEP_OTP_SCHEMA = vol.Schema({
     vol.Optional("otp", default=""): str,
     vol.Optional("richiedi_nuovo_codice", default=False): bool,
 })
-
-AVVISO_OTP_REINVIATO = (
-    "Ho chiesto a E-Distribuzione un nuovo codice: controlla email e SMS. Usa l'ultimo arrivato."
-)
-AVVISO_OTP_INVIO_NON_CONFERMATO = (
-    "Attenzione: E-Distribuzione non ha confermato l'invio del codice. Se non "
-    "ti arriva nulla, chiudi le altre sessioni aperte (esci dall'app "
-    "ufficiale e dal sito), poi spunta \"Richiedi un nuovo codice\" qui sotto "
-    "e invia il form senza inserire nessun codice."
-)
-AVVISO_OTP_SOLO_DA_QUI = (
-    "Il codice deve essere quello inviato da questa configurazione: un OTP "
-    "generato sul sito o nell'app appartiene a un'altra sessione di login e "
-    "verrebbe rifiutato."
-)
 
 
 def _etichetta_pod(pod_info: dict) -> str:
@@ -89,6 +75,10 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._pods_disponibili: list[dict] = []
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
+    def _testo(self, chiave: str, **segnaposto: str) -> str:
+        """Testo per i description_placeholders, che HA non traduce: vedi testi.py."""
+        return testo(self.hass.config.language, chiave, **segnaposto)
+
     # ------------------------------------------------------------------
     # Login email/password -> OTP
     # ------------------------------------------------------------------
@@ -109,7 +99,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:  # noqa: BLE001 - vedi commento in async_step_user
             _LOGGER.exception("Reinvio del codice OTP fallito")
             return "cannot_connect", None
-        return None, (AVVISO_OTP_REINVIATO if confermato else AVVISO_OTP_INVIO_NON_CONFERMATO)
+        return None, self._testo("otp_reinviato" if confermato else "otp_invio_non_confermato")
 
     def _form_otp(self, errors: dict[str, str], avviso: str):
         return self.async_show_form(
@@ -139,8 +129,8 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         codice (l'utente aspetterebbe altrimenti un OTP che non arriverà
         mai, senza che nulla glielo dica)."""
         if getattr(self._auth, "otp_invio_confermato", None) is False:
-            return AVVISO_OTP_INVIO_NON_CONFERMATO
-        return AVVISO_OTP_SOLO_DA_QUI
+            return self._testo("otp_invio_non_confermato")
+        return self._testo("otp_solo_da_qui")
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
@@ -194,7 +184,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is None:
             return ""
         pods = ", ".join(self._reauth_entry.data.get(CONF_PODS, []))
-        return f" Stai aggiornando le credenziali per i POD: {pods}."
+        return self._testo("nota_reauth", pods=pods)
 
     async def async_step_otp(self, user_input: dict[str, Any] | None = None):
         errors: dict[str, str] = {}
@@ -337,14 +327,14 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
             await self.hass.config_entries.async_reload(self.config_entry.entry_id)
             return self.async_create_entry(title="", data=nuove_opzioni)
 
-        opzioni_ruolo = [
-            {"value": TIPO_POD_SCAMBIO, "label": "Contatore normale / scambio"},
-            {"value": TIPO_POD_PRODUZIONE, "label": "Contatore fotovoltaico / produzione"},
-        ]
+        # Etichette in translations/*.json, sotto selector.tipo_pod.
+        opzioni_ruolo = [TIPO_POD_SCAMBIO, TIPO_POD_PRODUZIONE]
         schema = {
             vol.Required(
                 f"tipo_{pod}", default=tipi_attuali.get(pod, TIPO_POD_DEFAULT)
-            ): selector.SelectSelector(selector.SelectSelectorConfig(options=opzioni_ruolo))
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=opzioni_ruolo, translation_key="tipo_pod")
+            )
             for pod in pods
         }
         return self.async_show_form(step_id="tipo_pod", data_schema=vol.Schema(schema))
@@ -416,7 +406,9 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
                     selector.SelectSelectorConfig(options=opzioni, multiple=True)
                 )
             }),
-            description_placeholders={"pod_correnti": ", ".join(pods_attuali) or "nessuno"},
+            description_placeholders={
+                "pod_correnti": ", ".join(pods_attuali) or testo(self.hass.config.language, "nessun_pod")
+            },
         )
 
     async def async_step_rimuovi_pod(self, user_input: dict[str, Any] | None = None):

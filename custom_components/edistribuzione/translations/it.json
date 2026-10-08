@@ -87,5 +87,116 @@
       "refresh_failed": "Non è stato possibile rinnovare l'accesso a E-Distribuzione. Riprova più tardi; se il problema persiste potrebbe servire un nuovo login (rimuovi e riconfigura l'integrazione).",
       "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova più tardi."
     }
+  },
+  "entity": {
+    "sensor": {
+      "pod_configurati": {
+        "name": "POD configurati",
+        "state_attributes": {
+          "pods": {
+            "name": "POD"
+          }
+        }
+      },
+      "ultima_data_disponibile": {
+        "name": "Ultima data disponibile"
+      },
+      "prelievo_ultimo_giorno": {
+        "name": "Prelievo ultimo giorno",
+        "state_attributes": {
+          "giorno": {
+            "name": "Giorno"
+          }
+        }
+      },
+      "immissione_ultimo_giorno": {
+        "name": "Immissione ultimo giorno",
+        "state_attributes": {
+          "giorno": {
+            "name": "Giorno"
+          }
+        }
+      },
+      "produzione_ultimo_giorno": {
+        "name": "Produzione ultimo giorno",
+        "state_attributes": {
+          "giorno": {
+            "name": "Giorno"
+          }
+        }
+      },
+      "prelievo_tecnico_ultimo_giorno": {
+        "name": "Prelievo (tecnico) ultimo giorno",
+        "state_attributes": {
+          "giorno": {
+            "name": "Giorno"
+          }
+        }
+      }
+    }
+  },
+  "selector": {
+    "tipo_pod": {
+      "options": {
+        "scambio": "Contatore normale / scambio",
+        "produzione": "Contatore fotovoltaico / produzione"
+      }
+    }
+  },
+  "services": {
+    "recupera_storico": {
+      "name": "Recupera storico",
+      "description": "Richiede a E-Distribuzione entrambe le direzioni dell'energia (prelevata e immessa) per un periodo passato e le importa, con una sola richiesta per direzione per l'intero periodo (confermato funzionante fino a 181 giorni in un'unica risposta). Il recupero dello storico non è automatico: sei tu a decidere quando e quanto recuperare. Per periodi più lunghi ripeti l'azione su intervalli consecutivi.",
+      "fields": {
+        "device_id": {
+          "name": "Configurazione / POD",
+          "description": "Scegli il dispositivo per cui recuperare lo storico. Il dispositivo \"E-Distribuzione\" (account) recupera tutti i POD della configurazione insieme; il dispositivo di un singolo POD limita il recupero solo a quello."
+        },
+        "data_da": {
+          "name": "Data inizio",
+          "description": "Primo giorno del periodo da recuperare."
+        },
+        "data_a": {
+          "name": "Data fine",
+          "description": "Ultimo giorno del periodo da recuperare. I dati sono disponibili con un giorno di ritardo, quindi al massimo ieri."
+        }
+      }
+    },
+    "configura_energy_dashboard": {
+      "name": "Configura Energy Dashboard",
+      "description": "Aggiunge alla Energy Dashboard le statistiche di tutti i POD configurati, in base al ruolo assegnato a ciascuno (scambio -> sorgente rete, produzione -> sorgente solare). Azione idempotente: non sovrascrive né duplica sorgenti già presenti (incluse quelle configurate a mano), sicura da rilanciare dopo aver aggiunto un POD o cambiato un ruolo."
+    }
+  },
+  "exceptions": {
+    "dispositivo_non_trovato": {
+      "message": "Dispositivo non trovato (device_id={device_id})."
+    },
+    "dispositivo_senza_configurazione": {
+      "message": "Il dispositivo selezionato non appartiene a nessuna configurazione attiva."
+    },
+    "nessuna_istanza": {
+      "message": "Nessuna istanza E-Distribuzione configurata."
+    },
+    "pod_non_configurato": {
+      "message": "Il POD '{pod}' non è configurato su questa istanza. POD configurati: {pods}."
+    },
+    "date_invertite": {
+      "message": "La data di inizio ({data_da}) è successiva a quella di fine ({data_a})."
+    },
+    "data_fine_troppo_recente": {
+      "message": "La data di fine ({data_a}) è troppo recente: al momento si assume che i dati siano disponibili con almeno un giorno di ritardo, quindi al massimo fino al {ultimo_utile}."
+    },
+    "intervallo_troppo_ampio": {
+      "message": "Intervallo di {giorni} giorni troppo ampio per una singola richiesta (limite di cortesia: {massimo} giorni, circa 6 mesi). Ripeti l'azione su periodi più corti."
+    },
+    "nessun_dato_importato": {
+      "message": "Nessun dato importato per il periodo {data_da} - {data_a}. {dettagli}"
+    },
+    "refresh_token_fallito": {
+      "message": "Refresh del token fallito: {errore}"
+    },
+    "errore_import_pod": {
+      "message": "Errore importando il periodo per il POD {pod}: {errore}"
+    }
   }
 }

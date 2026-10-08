@@ -72,8 +72,10 @@ async def test_errore_api_su_tutti_i_pod_fa_fallire_l_azione(
         side_effect=ApiError("403 dal distributore")
     )
 
-    with freeze_time(OGGI), pytest.raises(HomeAssistantError, match="403 dal distributore"):
+    with freeze_time(OGGI), pytest.raises(HomeAssistantError) as errore:
         await coordinator.async_recupera_storico(DATA_DA, DATA_A)
+    assert errore.value.translation_key == "nessun_dato_importato"
+    assert "403 dal distributore" in errore.value.translation_placeholders["dettagli"]
 
 
 async def test_risposta_vuota_fa_fallire_l_azione(
@@ -82,8 +84,9 @@ async def test_risposta_vuota_fa_fallire_l_azione(
     coordinator = make_edist_coordinator(pods=[POD_A])
     coordinator._api.async_get_daily_load_profile = AsyncMock(return_value=[])
 
-    with freeze_time(OGGI), pytest.raises(HomeAssistantError, match="[Nn]essun dato"):
+    with freeze_time(OGGI), pytest.raises(HomeAssistantError) as errore:
         await coordinator.async_recupera_storico(DATA_DA, DATA_A)
+    assert errore.value.translation_key == "nessun_dato_importato"
 
 
 async def test_risposta_senza_misure_fa_fallire_l_azione(
@@ -97,8 +100,9 @@ async def test_risposta_senza_misure_fa_fallire_l_azione(
         return_value=[{"readings": {"sampleDate": "20260910", "sampleValues": []}}]
     )
 
-    with freeze_time(OGGI), pytest.raises(HomeAssistantError, match="[Nn]essun dato"):
+    with freeze_time(OGGI), pytest.raises(HomeAssistantError) as errore:
         await coordinator.async_recupera_storico(DATA_DA, DATA_A)
+    assert errore.value.translation_key == "nessun_dato_importato"
 
 
 async def test_successo_importa_entrambe_le_direzioni(

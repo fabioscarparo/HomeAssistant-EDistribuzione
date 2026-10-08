@@ -55,6 +55,7 @@ from .const import (
     TIPO_POD_PRODUZIONE,
 )
 from .statistics import async_get_ultima_data_disponibile, async_import_curva_giornaliera
+from .testi import testo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -143,14 +144,21 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         tipi = self.entry.options.get(CONF_TIPO_POD, {})
         return tipi.get(pod, TIPO_POD_DEFAULT)
 
+    @property
+    def lingua(self) -> str:
+        """Lingua del server, per i testi che HA non traduce (vedi testi.py)."""
+        return self.hass.config.language
+
     def _nome_serie(self, pod: str, immessa: bool) -> str:
         """Etichetta della external statistic per POD/direzione, dipendente
-        dal ruolo scelto dall'utente."""
+        dal ruolo scelto dall'utente. Il nome finisce nei metadati del
+        Recorder, senza traduzione: segue la lingua del server e si aggiorna
+        al primo import dopo un cambio di lingua."""
         if self.tipo_pod(pod) == TIPO_POD_PRODUZIONE:
-            return f"E-Distribuzione {pod} - produzione" if immessa else (
-                f"E-Distribuzione {pod} - prelievo (tecnico)"
-            )
-        return f"E-Distribuzione {pod} - immissione" if immessa else f"E-Distribuzione {pod} - prelievo"
+            chiave = "serie_produzione" if immessa else "serie_prelievo_tecnico"
+        else:
+            chiave = "serie_immissione" if immessa else "serie_prelievo"
+        return f"E-Distribuzione {pod} - {testo(self.lingua, chiave)}"
 
     async def _async_ensure_token(self) -> None:
         refresh_token = self.entry.data[CONF_REFRESH_TOKEN]
@@ -161,7 +169,11 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
             # refresh_token è stato revocato (cambio password, pulizia
             # sessioni lato Enel, ...) e l'utente deve rifare il login
             # tramite il reauth del config_flow.
-            raise UpdateFailed(f"Refresh del token fallito: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="refresh_token_fallito",
+                translation_placeholders={"errore": str(err)},
+            ) from err
 
         self._api.update_token(tokens.access_token)
 
@@ -444,7 +456,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                     for giorno in _giorni_nel_periodo(data_da, data_a):
                         self._accoda_giorno(pod, giorno)
                     raise UpdateFailed(
-                        f"Errore importando il periodo per il POD {pod}: {err}"
+                        translation_domain=DOMAIN,
+                        translation_key="errore_import_pod",
+                        translation_placeholders={"pod": pod, "errore": str(err)},
                     ) from err
 
                 ricevuti_prelevata = risultati.get(MAGNITUDE_PRELEVATA, {}).get(
@@ -515,30 +529,36 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         """
         if pod is not None and pod not in self.pods:
             raise ServiceValidationError(
-                f"Il POD '{pod}' non è configurato su questa istanza. "
-                f"POD configurati: {', '.join(self.pods)}"
+                translation_domain=DOMAIN,
+                translation_key="pod_non_configurato",
+                translation_placeholders={"pod": pod, "pods": ", ".join(self.pods)},
             )
         pod_da_recuperare = [pod] if pod else list(self.pods)
 
         if data_da > data_a:
             raise ServiceValidationError(
-                f"La data di inizio ({data_da}) è successiva a quella di fine ({data_a})."
+                translation_domain=DOMAIN,
+                translation_key="date_invertite",
+                translation_placeholders={"data_da": str(data_da), "data_a": str(data_a)},
             )
 
         ultimo_utile = dt_util.now().date() - timedelta(days=RITARDO_DATI_GIORNI)
         if data_a > ultimo_utile:
             raise ServiceValidationError(
-                f"La data di fine ({data_a}) è troppo recente: al momento si assume che i "
-                f"dati siano disponibili con almeno un giorno di ritardo, quindi al "
-                f"massimo fino al {ultimo_utile}."
+                translation_domain=DOMAIN,
+                translation_key="data_fine_troppo_recente",
+                translation_placeholders={"data_a": str(data_a), "ultimo_utile": str(ultimo_utile)},
             )
 
         giorni_totali = (data_a - data_da).days + 1
         if giorni_totali > MAX_GIORNI_RECUPERO_STORICO:
             raise ServiceValidationError(
-                f"Intervallo di {giorni_totali} giorni troppo ampio per una singola "
-                f"richiesta (limite di cortesia: {MAX_GIORNI_RECUPERO_STORICO} giorni, "
-                "~6 mesi). Ripeti l'azione su periodi più corti."
+                translation_domain=DOMAIN,
+                translation_key="intervallo_troppo_ampio",
+                translation_placeholders={
+                    "giorni": str(giorni_totali),
+                    "massimo": str(MAX_GIORNI_RECUPERO_STORICO),
+                },
             )
 
         await self._async_ensure_token()
@@ -578,7 +598,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                     data_da,
                     data_a,
                 )
-                fallimenti.append(f"{pod_corrente}: nessun dato per il periodo richiesto")
+                fallimenti.append(f"{pod_corrente}: {testo(self.lingua, 'nessun_dato_pod')}")
                 continue
 
             giorni_attesi = _giorni_nel_periodo(data_da, data_a)
@@ -608,8 +628,13 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
 
         if pod_con_dati == 0:
             raise HomeAssistantError(
-                f"Nessun dato importato per il periodo {data_da} - {data_a}. "
-                + "; ".join(fallimenti)
+                translation_domain=DOMAIN,
+                translation_key="nessun_dato_importato",
+                translation_placeholders={
+                    "data_da": str(data_da),
+                    "data_a": str(data_a),
+                    "dettagli": "; ".join(fallimenti),
+                },
             )
 
     @property

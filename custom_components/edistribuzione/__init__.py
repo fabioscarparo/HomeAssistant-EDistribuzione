@@ -45,7 +45,11 @@ def _risolvi_coordinator_e_pod_da_device(
     dev_reg = dr.async_get(hass)
     device = dev_reg.async_get(device_id)
     if device is None:
-        raise HomeAssistantError(f"Dispositivo non trovato (device_id={device_id!r})")
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="dispositivo_non_trovato",
+            translation_placeholders={"device_id": device_id},
+        )
 
     # Ricerca "a ritroso" tra le config entry attive di questa integrazione,
     # invece di leggere device.config_entries (deprecato dalla
@@ -61,7 +65,7 @@ def _risolvi_coordinator_e_pod_da_device(
     )
     if entry_id is None:
         raise HomeAssistantError(
-            "Il dispositivo selezionato non appartiene a nessuna configurazione attiva."
+            translation_domain=DOMAIN, translation_key="dispositivo_senza_configurazione"
         )
 
     coordinator = hass.data[DOMAIN][entry_id]
@@ -98,7 +102,9 @@ async def _async_registra_servizi(hass: HomeAssistant) -> None:
             c for c in hass.data.get(DOMAIN, {}).values() if isinstance(c, EdistribuzioneCoordinator)
         ]
         if not coordinatori:
-            raise HomeAssistantError("Nessuna istanza E-Distribuzione configurata.")
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="nessuna_istanza"
+            )
         await async_configura_energy_dashboard(hass, coordinatori)
 
     hass.services.async_register(

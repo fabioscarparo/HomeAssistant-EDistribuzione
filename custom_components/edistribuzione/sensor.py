@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, TIPO_POD_PRODUZIONE
 from .coordinator import EdistribuzioneCoordinator
 from .device_helpers import assicura_dispositivo_padre, collega_al_padre
+from .testi import testo
 
 
 async def async_setup_entry(
@@ -29,30 +30,33 @@ async def async_setup_entry(
     async_add_entities(build_entities(hass, coordinator))
 
 
-def _device_info_account(entry: ConfigEntry) -> DeviceInfo:
-    """Dispositivo "genitore" per tutti i POD di questa config entry."""
+def _device_info_account(entry: ConfigEntry, lingua: str | None) -> DeviceInfo:
+    """Dispositivo "genitore" per tutti i POD di questa config entry.
+
+    Il "model" non ha chiave di traduzione in HA: segue la lingua del
+    server (vedi testi.py)."""
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
         name="E-Distribuzione",
         manufacturer="E-Distribuzione",
-        model="Account API",
+        model=testo(lingua, "modello_account"),
     )
 
 
 def _device_info_pod(
-    entry: ConfigEntry, pod: str, ruolo: str, id_padre: str | None = None
+    entry: ConfigEntry, pod: str, ruolo: str, lingua: str | None, id_padre: str | None = None
 ) -> DeviceInfo:
     """Dispositivo per un singolo POD, agganciato all'account.
 
     Il "model" dipende dal ruolo scelto dall'utente (vedi
     EdistribuzioneCoordinator.tipo_pod) - puramente cosmetico, non
     influenza quali dati vengono richiesti."""
-    modello = "Punto di produzione" if ruolo == TIPO_POD_PRODUZIONE else "Punto di prelievo"
+    chiave = "modello_produzione" if ruolo == TIPO_POD_PRODUZIONE else "modello_prelievo"
     info = DeviceInfo(
         identifiers={(DOMAIN, f"{entry.entry_id}_{pod}")},
         name=f"POD {pod}",
         manufacturer="E-Distribuzione",
-        model=modello,
+        model=testo(lingua, chiave),
     )
     return collega_al_padre(info, {(DOMAIN, entry.entry_id)}, id_padre)
 
@@ -65,7 +69,9 @@ def build_entities(hass, coordinator: EdistribuzioneCoordinator) -> list[SensorE
     # Il dispositivo "account" va registrato PRIMA di quelli per POD, che lo
     # referenziano come padre: su HA 2026.8+ serve il suo ID interno, che
     # esiste solo dopo la registrazione.
-    id_padre = assicura_dispositivo_padre(hass, entry.entry_id, dict(_device_info_account(entry)))
+    id_padre = assicura_dispositivo_padre(
+        hass, entry.entry_id, dict(_device_info_account(entry, coordinator.lingua))
+    )
 
     entities: list[SensorEntity] = [PodConfiguratiSensor(coordinator, entry)]
     for pod in coordinator.pods:
@@ -81,6 +87,7 @@ class PodConfiguratiSensor(SensorEntity):
     funzionare via_device dei dispositivi per-POD."""
 
     _attr_has_entity_name = True
+    _attr_translation_key = "pod_configurati"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:counter"
 
@@ -88,9 +95,8 @@ class PodConfiguratiSensor(SensorEntity):
         super().__init__()
         self.coordinator = coordinator
         self._attr_unique_id = f"{entry.entry_id}_pod_configurati"
-        self._attr_name = "POD configurati"
         self._attr_native_value = len(coordinator.pods)
-        self._attr_device_info = _device_info_account(entry)
+        self._attr_device_info = _device_info_account(entry, coordinator.lingua)
 
     @property
     def extra_state_attributes(self):
@@ -105,6 +111,7 @@ class UltimaDataDisponibileSensor(
     external statistics, non solo se l'ultimo ciclo è girato con successo."""
 
     _attr_has_entity_name = True
+    _attr_translation_key = "ultima_data_disponibile"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DATE
     _attr_icon = "mdi:calendar-check"
@@ -119,8 +126,9 @@ class UltimaDataDisponibileSensor(
         super().__init__(coordinator)
         self._pod = pod
         self._attr_unique_id = f"{entry.entry_id}_{pod}_ultima_data_disponibile"
-        self._attr_name = "Ultima data disponibile"
-        self._attr_device_info = _device_info_pod(entry, pod, coordinator.tipo_pod(pod), id_padre)
+        self._attr_device_info = _device_info_pod(
+            entry, pod, coordinator.tipo_pod(pod), coordinator.lingua, id_padre
+        )
         self._ripristinato: date | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -171,18 +179,20 @@ class ConsumoGiornoSensor(
         self._immessa = immessa
         chiave_unique = "immessa" if immessa else "prelevata"
         self._attr_unique_id = f"{entry.entry_id}_{pod}_consumo_giorno_{chiave_unique}"
-        self._attr_name = self._etichetta(coordinator, pod, immessa)
-        self._attr_device_info = _device_info_pod(entry, pod, coordinator.tipo_pod(pod), id_padre)
+        self._attr_translation_key = self._chiave_traduzione(coordinator, pod, immessa)
+        self._attr_device_info = _device_info_pod(
+            entry, pod, coordinator.tipo_pod(pod), coordinator.lingua, id_padre
+        )
         self._ripristinato: float | None = None
 
     @staticmethod
-    def _etichetta(coordinator: EdistribuzioneCoordinator, pod: str, immessa: bool) -> str:
-        """Nome del sensore, dipendente dal ruolo scelto dall'utente per
-        questo POD - stessa etichetta della statistica corrispondente
-        (vedi EdistribuzioneCoordinator._nome_serie)."""
+    def _chiave_traduzione(coordinator: EdistribuzioneCoordinator, pod: str, immessa: bool) -> str:
+        """Chiave del nome in translations/*.json, dipendente dal ruolo
+        scelto dall'utente per questo POD - stessa etichetta della
+        statistica corrispondente (vedi EdistribuzioneCoordinator._nome_serie)."""
         if coordinator.tipo_pod(pod) == TIPO_POD_PRODUZIONE:
-            return "Produzione ultimo giorno" if immessa else "Prelievo (tecnico) ultimo giorno"
-        return "Immissione ultimo giorno" if immessa else "Prelievo ultimo giorno"
+            return "produzione_ultimo_giorno" if immessa else "prelievo_tecnico_ultimo_giorno"
+        return "immissione_ultimo_giorno" if immessa else "prelievo_ultimo_giorno"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
