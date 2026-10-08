@@ -6,16 +6,19 @@ frontend, così la card compare nel selettore delle card senza dover
 aggiungere a mano una risorsa Lovelace (né installare un secondo repository
 HACS di tipo "plugin").
 
-Il parametro ?v=<versione del manifest> cambia a ogni release: i browser
-(e l'app companion) scaricano la nuova card invece di tenere quella in cache.
+Il file è servito con cache_headers=True, cioè in cache per 31 giorni: il
+parametro ?v=<impronta del contenuto> cambia appena cambia il file, così
+browser e app companion scaricano la card nuova. Legarlo alla versione del
+manifest non bastava: un commit senza aumento di versione (il fork non
+pubblica release) lasciava in cache la card precedente.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
-from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
 
@@ -26,6 +29,11 @@ URL_STATICO = f"/{DOMAIN}_static/{NOME_FILE}"
 PERCORSO_FILE = Path(__file__).parent / "frontend" / NOME_FILE
 
 _CHIAVE_REGISTRATA = f"{DOMAIN}_card_registrata"
+
+
+def impronta_file(percorso: Path = PERCORSO_FILE) -> str:
+    """Prime 12 cifre esadecimali dello SHA-256 del file della card."""
+    return hashlib.sha256(percorso.read_bytes()).hexdigest()[:12]
 
 
 async def async_registra_card(hass: HomeAssistant) -> None:
@@ -47,10 +55,10 @@ async def async_registra_card(hass: HomeAssistant) -> None:
     from homeassistant.components.frontend import add_extra_js_url
     from homeassistant.components.http import StaticPathConfig
 
-    integrazione = await async_get_integration(hass, DOMAIN)
+    impronta = await hass.async_add_executor_job(impronta_file)
     await hass.http.async_register_static_paths(
         [StaticPathConfig(URL_STATICO, str(PERCORSO_FILE), cache_headers=True)]
     )
-    add_extra_js_url(hass, f"{URL_STATICO}?v={integrazione.version}")
+    add_extra_js_url(hass, f"{URL_STATICO}?v={impronta}")
     hass.data[_CHIAVE_REGISTRATA] = True
     _LOGGER.debug("Card Lovelace registrata su %s", URL_STATICO)

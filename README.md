@@ -324,8 +324,20 @@ editor.
 2. Select **Add card** and search for **E-Distribuzione · POD**.
 3. Add and save the card. With no options it shows the first POD found.
 
-If the card is not in the picker, reload the page, or close and reopen the
-companion app: it may still have the previous frontend cached.
+### If the card shows an error
+
+Right after installing or updating the integration, the companion app can
+keep showing the frontend from its cache: the card is missing from the
+picker, or the dashboard shows an error such as *Custom element doesn't
+exist: edistribuzione-pod-card*. Reset the app's frontend cache, then
+reopen the app:
+
+- **Android:** **Settings → Companion app → Troubleshooting → Reset
+  frontend cache**
+- **iOS:** **Settings → Companion app → Debugging → Clear web view cache**
+
+In a browser, a hard reload is enough: **Ctrl+Shift+R**, or
+**Cmd+Shift+R** on macOS.
 
 ### Configuration
 

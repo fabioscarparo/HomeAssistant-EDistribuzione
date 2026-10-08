@@ -31,12 +31,8 @@ async def test_senza_http_non_registra_nulla(hass):
 async def test_registra_percorso_statico_e_modulo_una_sola_volta(hass):
     hass.http = MagicMock(async_register_static_paths=AsyncMock())
     hass.config.components.add("frontend")
-    integrazione = MagicMock(version="9.9.9")
 
-    with (
-        patch.object(lovelace_card, "async_get_integration", AsyncMock(return_value=integrazione)),
-        patch("homeassistant.components.frontend.add_extra_js_url") as add_url,
-    ):
+    with patch("homeassistant.components.frontend.add_extra_js_url") as add_url:
         await lovelace_card.async_registra_card(hass)
         await lovelace_card.async_registra_card(hass)
 
@@ -44,4 +40,17 @@ async def test_registra_percorso_statico_e_modulo_una_sola_volta(hass):
     (config,) = hass.http.async_register_static_paths.await_args.args[0]
     assert config.url_path == lovelace_card.URL_STATICO
     assert config.path == str(lovelace_card.PERCORSO_FILE)
-    add_url.assert_called_once_with(hass, f"{lovelace_card.URL_STATICO}?v=9.9.9")
+    add_url.assert_called_once_with(
+        hass, f"{lovelace_card.URL_STATICO}?v={lovelace_card.impronta_file()}"
+    )
+
+
+def test_l_impronta_cambia_col_contenuto_della_card(tmp_path):
+    """La card è in cache per 31 giorni: il ?v= deve cambiare a ogni
+    modifica del file, anche senza aumentare la versione del manifest."""
+    card = tmp_path / "card.js"
+    card.write_text("console.log(1);", encoding="utf-8")
+    prima = lovelace_card.impronta_file(card)
+    card.write_text("console.log(2);", encoding="utf-8")
+    assert lovelace_card.impronta_file(card) != prima
+    assert len(prima) == 12

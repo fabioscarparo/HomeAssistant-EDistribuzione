@@ -1155,7 +1155,7 @@ if (!window.customCards.some((c) => c.type === CARD_TYPE)) {
     name: STRINGS[lang].card_name,
     description: STRINGS[lang].card_description,
     preview: true,
-    documentationURL: "https://github.com/maurobraggio/HomeAssistant-EDistribuzione",
+    documentationURL: "https://github.com/fabioscarparo/HomeAssistant-EDistribuzione#pod-lovelace-card",
   });
 }
 

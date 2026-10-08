@@ -9,7 +9,7 @@
   ],
   "codeowners": [],
   "config_flow": true,
-  "documentation": "https://github.com/maurobraggio/HomeAssistant-EDistribuzione",
+  "documentation": "https://github.com/fabioscarparo/HomeAssistant-EDistribuzione",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/maurobraggio/HomeAssistant-EDistribuzione/issues",
   "requirements": [],
