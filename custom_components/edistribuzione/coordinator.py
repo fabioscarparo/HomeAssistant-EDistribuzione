@@ -1,23 +1,22 @@
-"""DataUpdateCoordinator per E-Distribuzione.
+"""DataUpdateCoordinator for E-Distribuzione.
 
-Supporta più POD sulla stessa config entry (stessa credenziale, stessa
-utenza autenticata). Ogni ciclo, per ciascun POD, se è il momento (coda +
-orario, al massimo una volta al giorno): richiede ENTRAMBE le direzioni
-dell'energia (prelevata e immessa, vedi MAGNITUDE_TUTTE in const.py) per gli
-ultimi GIORNI_RICONTROLLO giorni (non solo il più recente, per ricontrollare
-eventuali rettifiche di E-Distribuzione su giorni già importati), in
-un'unica richiesta per direzione. La scrittura effettiva nelle external
-statistics ricalcola sempre l'intera serie dal raw storage a 15 minuti (vedi
-statistics.py), quindi una rettifica corregge automaticamente anche le sum
-cumulative successive.
+Supports multiple PODs on the same config entry (same credential, same
+authenticated account). Each cycle, for each POD, when it is time (queue +
+hour, at most once a day): it requests BOTH energy directions (consumption and
+injection, see MAGNITUDE_TUTTE in const.py) for the last GIORNI_RICONTROLLO
+days (not only the most recent, to recheck any corrections E-Distribuzione made
+to days already imported), in a single request per direction. Writing into the
+external statistics always recomputes the whole series from the 15-minute raw
+storage (see statistics.py), so a correction also fixes the following cumulative
+sums automatically.
 
-Un giorno esce dalla coda di retry se almeno una delle due direzioni lo ha
-restituito: un POD senza una delle due (es. un contatore normale che non
-misura mai immissione) non deve restare in coda per sempre in attesa di un
-dato che non arriverà.
+A day leaves the retry queue if at least one of the two directions returned it:
+a POD without one of the two (e.g. a regular meter that never measures
+injection) must not stay in the queue forever waiting for data that will not
+arrive.
 
-async_recupera_storico accetta un parametro 'pod' opzionale: se omesso,
-recupera lo storico per TUTTI i POD della entry.
+async_recupera_storico takes an optional 'pod' parameter: if omitted, it
+fetches the history for ALL the PODs of the entry.
 """
 from __future__ import annotations
 
@@ -63,7 +62,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _giorni_nel_periodo(data_da: date, data_a: date) -> list[date]:
-    """Elenco dei giorni compresi nell'intervallo, estremi inclusi."""
+    """List of days in the range, both ends included."""
     giorni, cursore = [], data_da
     while cursore <= data_a:
         giorni.append(cursore)
@@ -72,8 +71,8 @@ def _giorni_nel_periodo(data_da: date, data_a: date) -> list[date]:
 
 
 def _giorni_ricevuti(curva: list[dict]) -> set[date]:
-    """Giorni effettivamente presenti nella risposta (campo sampleDate,
-    formato YYYYMMDD), scartando quelli senza campioni."""
+    """Days actually present in the response (sampleDate field, YYYYMMDD
+    format), dropping those without samples."""
     giorni: set[date] = set()
     for elemento in curva:
         readings = elemento.get("readings", {})
@@ -88,7 +87,7 @@ def _giorni_ricevuti(curva: list[dict]) -> set[date]:
 
 
 def _kwh_del_giorno(curva: list[dict], giorno: date) -> float | None:
-    """Totale kWh di un singolo giorno dentro una risposta multi-giorno."""
+    """Total kWh of a single day inside a multi-day response."""
     atteso = giorno.strftime("%Y%m%d")
     for elemento in curva:
         readings = elemento.get("readings", {})
@@ -98,24 +97,23 @@ def _kwh_del_giorno(curva: list[dict], giorno: date) -> float | None:
 
 
 def _curva_ha_dati(curva: list[dict]) -> bool:
-    """True se la risposta di async_get_daily_load_profile contiene davvero
-    dei campioni, non solo una struttura vuota."""
+    """True if the async_get_daily_load_profile response really contains
+    samples, not just an empty structure."""
     return bool(curva) and bool(curva[0].get("readings", {}).get("sampleValues"))
 
 
 def _magnitude_onorata(curva: list[dict], magnitude_richiesta: str) -> bool:
-    """True se il server ha davvero servito la magnitude richiesta.
+    """True if the server actually served the requested magnitude.
 
-    'energyType' nella risposta rimanda indietro la magnitude effettivamente
-    servita: se il server ignora silenziosamente un parametro sconosciuto e
-    risponde comunque con la prelevata, questo campo lo rivela. Senza questo
-    controllo, una magnitude ignorata sembrerebbe un successo e finirebbe a
-    duplicare la prelevata nella serie immessa - è il rischio principale di
-    questa integrazione finché MAGNITUDE_IMMESSA non è confermata.
+    'energyType' in the response echoes back the magnitude actually served: if
+    the server silently ignores an unknown parameter and replies with
+    consumption anyway, this field reveals it. Without this check, an ignored
+    magnitude would look like a success and end up duplicating consumption into
+    the injection series - the main risk of this integration until
+    MAGNITUDE_IMMESSA is confirmed.
 
-    Un elemento senza 'energyType' (mai osservato, ma non escluso da nessuna
-    documentazione) non fa fallire il controllo: si presume onorato piuttosto
-    che scartare dati buoni per un campo assente.
+    An element without 'energyType' does not fail the check: it is assumed
+    honoured rather than discarding good data for a missing field.
     """
     for elemento in curva:
         energy_type = elemento.get("readings", {}).get("energyType")
@@ -135,30 +133,30 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         )
         self.entry = entry
         self.pods: list[str] = list(entry.data[CONF_PODS])
-        # True finché il rinnovo del token trova la verifica antibot di
-        # E-Distribuzione (vedi _async_ensure_token e async_setup_entry).
+        # True while the token refresh hits E-Distribuzione's anti-bot check
+        # (see _async_ensure_token and async_setup_entry).
         self.accesso_bloccato = False
         session = async_get_clientsession(hass)
         self._auth = AuthClient(session)
         self._api = ApiClient(session, access_token="")
 
     def tipo_pod(self, pod: str) -> str:
-        """Ruolo assegnato dall'utente al POD (scambio/produzione), dalle
-        opzioni della config entry. Influenza solo le etichette visibili
-        (vedi _nome_serie), mai quali direzioni vengono richieste."""
+        """Role assigned by the user to the POD (exchange/production), from the
+        config entry options. Only affects the visible labels (see
+        _nome_serie), never which directions are requested."""
         tipi = self.entry.options.get(CONF_TIPO_POD, {})
         return tipi.get(pod, TIPO_POD_DEFAULT)
 
     @property
     def lingua(self) -> str:
-        """Lingua del server, per i testi che HA non traduce (vedi testi.py)."""
+        """Server language, for the texts HA does not translate (see testi.py)."""
         return self.hass.config.language
 
     def _nome_serie(self, pod: str, immessa: bool) -> str:
-        """Etichetta della external statistic per POD/direzione, dipendente
-        dal ruolo scelto dall'utente. Il nome finisce nei metadati del
-        Recorder, senza traduzione: segue la lingua del server e si aggiorna
-        al primo import dopo un cambio di lingua."""
+        """External statistic label per POD/direction, depending on the role
+        chosen by the user. The name ends up in the Recorder metadata, with no
+        translation: it follows the server language and updates on the first
+        import after a language change."""
         if self.tipo_pod(pod) == TIPO_POD_PRODUZIONE:
             chiave = "serie_produzione" if immessa else "serie_prelievo_tecnico"
         else:
@@ -170,9 +168,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         try:
             tokens = await self._auth.async_refresh_access_token(refresh_token)
         except AccessoBloccato as err:
-            # Il refresh_token resta valido e salvato: si riprova al ciclo
-            # successivo, e l'avviso in Riparazioni spiega perché i dati
-            # sono fermi invece di lasciarlo dedurre dai log.
+            # The refresh_token stays valid and saved: we retry on the next
+            # cycle, and the Repairs notice explains why the data is stuck
+            # instead of leaving it to be inferred from the logs.
             self.accesso_bloccato = True
             ir.async_create_issue(
                 self.hass,
@@ -186,17 +184,16 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 translation_domain=DOMAIN, translation_key="accesso_bloccato"
             ) from err
         except AuthError as err:
-            # Un refresh fallito significa quasi certamente che il
-            # refresh_token è stato revocato (cambio password, pulizia
-            # sessioni lato Enel, ...) e l'utente deve rifare il login
-            # tramite il reauth del config_flow.
+            # A failed refresh almost certainly means the refresh_token was
+            # revoked (password change, Enel-side session cleanup, ...) and the
+            # user must log in again through the config_flow reauth.
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="refresh_token_fallito",
                 translation_placeholders={"errore": str(err)},
             ) from err
 
-        # Accesso di nuovo possibile: l'avviso, se c'era, non serve più.
+        # Access possible again: the notice, if any, is no longer needed.
         self.accesso_bloccato = False
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
         self._api.update_token(tokens.access_token)
@@ -207,14 +204,14 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
             self.hass.config_entries.async_update_entry(self.entry, data=new_data)
 
     # ------------------------------------------------------------------
-    # Orario configurabile + coda dei giorni da riprovare, PER POD
+    # Configurable hour + queue of days to retry, PER POD
     # ------------------------------------------------------------------
 
     @property
     def _ora_richiesta(self) -> int:
-        """Ora (locale) a partire dalla quale chiedere la curva del giorno
-        prima. Configurabile dalle opzioni: se capitano richieste spesso
-        vuote conviene spostarla più avanti."""
+        """Hour (local) from which to request the previous day's curve.
+        Configurable from the options: if requests often come back empty it is
+        worth moving it later."""
         valore = self.entry.options.get(CONF_ORA_RICHIESTA)
         if valore is None:
             return ORA_MINIMA_RICHIESTA
@@ -235,12 +232,12 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         return ora
 
     def _leggi_code(self) -> dict[str, dict[str, date]]:
-        """Code dei giorni da riprovare, UNA PER POD:
-        {pod: {giorno ISO: data di primo inserimento}}.
+        """Queues of days to retry, ONE PER POD:
+        {pod: {ISO day: date first queued}}.
 
-        La data di primo inserimento fa da timer: un giorno viene abbandonato
-        dopo ABBANDONO_CODA_DOPO_GIORNI a prescindere dal numero di
-        tentativi (vedi _scrivi_code).
+        The first-queued date acts as a timer: a day is dropped after
+        ABBANDONO_CODA_DOPO_GIORNI regardless of the number of attempts (see
+        _scrivi_code).
         """
         grezzo = self.entry.data.get(CONF_GIORNI_DA_RIPROVARE) or {}
         oggi = dt_util.now().date()
@@ -257,7 +254,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         return {pod: _con_date(coda) for pod, coda in grezzo.items()}
 
     def _scrivi_code(self, code: dict[str, dict[str, date]]) -> None:
-        """Salva le code, scartando i giorni troppo vecchi e limitandone il numero, per ciascun POD."""
+        """Save the queues, dropping days that are too old and capping their number, per POD."""
         oggi = dt_util.now().date()
         pulite: dict[str, dict[str, str]] = {}
         for pod, coda in code.items():
@@ -334,34 +331,32 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         self._scrivi_code(code)
 
     async def _prossima_richiesta(self, pod: str) -> tuple[date, date] | None:
-        """Decide che intervallo chiedere per questo POD in questo ciclo.
+        """Decide which range to request for this POD in this cycle.
 
-        Un POD senza NESSUN dato ancora importato (primo avvio della entry,
-        o un POD aggiunto in seguito dalle opzioni) chiede subito, a
-        prescindere dall'orario configurato - serve a verificare da subito
-        che POD e token siano validi, invece di scoprirlo solo a sera. Nei
-        cicli successivi aspetta l'orario configurato, poi al massimo una
-        volta al giorno (la stessa 'atteso' resta invariata finché non
-        cambia il giorno) chiede in UNA SOLA richiesta gli ultimi
-        GIORNI_RICONTROLLO giorni fino al giorno atteso - non solo il più
-        recente: E-Distribuzione può rettificare un giorno già pubblicato, e
-        senza questo ricontrollo periodico quella correzione non verrebbe
-        mai vista in automatico (resta comunque recuperabile a mano con
+        A POD with NO data imported yet (the entry's first start, or a POD added
+        later from the options) requests immediately, regardless of the
+        configured hour - this checks right away that the POD and token are
+        valid, instead of finding out only in the evening. On later cycles it
+        waits for the configured hour, then at most once a day (the same
+        'atteso' stays unchanged until the day changes) requests in a SINGLE
+        request the last GIORNI_RICONTROLLO days up to the expected day - not
+        only the most recent: E-Distribuzione may correct a day already
+        published, and without this periodic recheck that correction would never
+        be seen automatically (it stays recoverable by hand with
         recupera_storico).
 
-        Se ci sono giorni arretrati PIU' VECCHI della finestra di
-        ricontrollo (bloccati in coda da un errore precedente), l'intervallo
-        si allarga all'indietro per includerli, sempre in un'unica
-        richiesta.
+        If there are backlog days OLDER than the recheck window (stuck in the
+        queue from a previous error), the range widens backwards to include
+        them, still in a single request.
 
-        BUG STORICO (corretto qui): la versione precedente subordinava il
-        fetch immediato a CONF_DATA_INSTALLAZIONE, un flag CONDIVISO da tutta
-        la config entry invece che per-POD. Con più POD configurati fin dal
-        primo avvio, solo il primo della lista veniva verificato subito - il
-        secondo (e successivi) restava senza nessun dato fino all'orario
-        configurato, perché quando il ciclo arrivava a lui il flag era già
-        stato impostato dal primo. La condizione corretta è "questo POD ha
-        già dei dati?", non "è già passato il primo avvio della entry?".
+        PAST BUG (fixed here): the previous version made the immediate fetch
+        depend on CONF_DATA_INSTALLAZIONE, a flag SHARED by the whole config
+        entry instead of per-POD. With several PODs configured from the first
+        start, only the first in the list was checked immediately - the second
+        (and later) ones stayed without any data until the configured hour,
+        because by the time the cycle reached them the flag had already been set
+        by the first. The correct condition is "does this POD already have
+        data?", not "has the entry's first start already happened?".
         """
         oggi = dt_util.now().date()
         atteso = oggi - timedelta(days=RITARDO_DATI_GIORNI)
@@ -389,9 +384,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
             if adesso.hour < self._ora_richiesta:
                 return None
             if ultima_disponibile >= atteso:
-                # Già ricontrollato oggi ('atteso' resta lo stesso fino a
-                # mezzanotte): al massimo una richiesta al giorno per POD,
-                # non una ad ogni ciclo orario dopo l'orario configurato.
+                # Already rechecked today ('atteso' stays the same until
+                # midnight): at most one request per day per POD, not one on
+                # every hourly cycle after the configured hour.
                 return None
 
         inizio_ricontrollo = atteso - timedelta(days=GIORNI_RICONTROLLO - 1)
@@ -408,21 +403,20 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         return inizio, atteso
 
     # ------------------------------------------------------------------
-    # Fetch + import, condiviso tra ciclo automatico e recupero storico
+    # Fetch + import, shared between the automatic cycle and the history fetch
     # ------------------------------------------------------------------
 
     async def _async_importa_periodo(self, pod: str, data_da: date, data_a: date) -> dict[str, dict]:
-        """Richiede e importa ENTRAMBE le direzioni per un POD sul periodo
-        [data_da, data_a] (estremi inclusi), in due chiamate API separate.
+        """Request and import BOTH directions for a POD over the period
+        [data_da, data_a] (both ends included), in two separate API calls.
 
-        Una sola richiesta per direzione, non una per giorno: l'endpoint
-        accetta un intervallo multi-giorno vero in un'unica risposta
-        (confermato funzionante fino a 181 giorni).
+        A single request per direction, not one per day: the endpoint accepts a
+        real multi-day range in a single response (up to 181 days).
 
-        Ritorna {magnitude: {"giorni_ricevuti": set[date], "kwh_ultimo_giorno":
-        float|None}} per le sole direzioni che hanno restituito dati validi
-        e onorati (vedi _magnitude_onorata) - una direzione senza dati per
-        questo POD/periodo semplicemente non compare nel risultato.
+        Returns {magnitude: {"giorni_ricevuti": set[date], "kwh_ultimo_giorno":
+        float|None}} for the directions that returned valid, honoured data (see
+        _magnitude_onorata) - a direction with no data for this POD/period
+        simply does not appear in the result.
         """
         risultati: dict[str, dict] = {}
         for magnitude in MAGNITUDE_TUTTE:
@@ -456,7 +450,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         return risultati
 
     # ------------------------------------------------------------------
-    # Ciclo di polling automatico
+    # Automatic polling cycle
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> dict:
@@ -475,8 +469,8 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 try:
                     risultati = await self._async_importa_periodo(pod, data_da, data_a)
                 except ApiError as err:
-                    # I giorni richiesti vanno in coda invece di andare
-                    # persi: al ciclo successivo 'atteso' sarebbe già avanzato.
+                    # The requested days go into the queue instead of being
+                    # lost: on the next cycle 'atteso' would already have moved.
                     for giorno in _giorni_nel_periodo(data_da, data_a):
                         self._accoda_giorno(pod, giorno)
                     raise UpdateFailed(
@@ -493,9 +487,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 )
                 ricevuti_unione = ricevuti_prelevata | ricevuti_immessa
 
-                # Un giorno esce dalla coda se ALMENO UNA direzione lo ha
-                # restituito: un POD senza una delle due non deve restare in
-                # coda per sempre in attesa di un dato che non arriverà.
+                # A day leaves the queue if AT LEAST ONE direction returned it:
+                # a POD without one of the two must not stay in the queue
+                # forever waiting for data that will not arrive.
                 richiesti = _giorni_nel_periodo(data_da, data_a)
                 if ricevuti_unione:
                     self._rimuovi_dalla_coda(pod, [g for g in richiesti if g in ricevuti_unione])
@@ -532,24 +526,22 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         return {"by_pod": by_pod}
 
     # ------------------------------------------------------------------
-    # Recupero storico manuale (azione edistribuzione.recupera_storico)
+    # Manual history fetch (edistribuzione.recupera_storico action)
     # ------------------------------------------------------------------
 
     async def async_recupera_storico(
         self, data_da: date, data_a: date, pod: str | None = None
     ) -> None:
-        """Recupera e importa entrambe le direzioni per l'intervallo
-        [data_da, data_a].
+        """Fetch and import both directions for the range [data_da, data_a].
 
-        Se 'pod' è omesso, lo fa per TUTTI i POD configurati sulla entry; se
-        specificato, solo per quello.
+        If 'pod' is omitted, it does so for ALL the PODs configured on the
+        entry; if specified, only for that one.
 
-        Solleva HomeAssistantError se al termine non è stato importato
-        nulla per nessun POD (né prelevata né immessa): l'azione è manuale e
-        lanciata dall'interfaccia, dove un fallimento silenzioso è
-        indistinguibile da un successo. Con più POD e un fallimento solo
-        parziale l'azione riesce - qualcosa è stato importato - e i POD
-        falliti restano nei log.
+        Raises HomeAssistantError if nothing was imported for any POD (neither
+        consumption nor injection): the action is manual and launched from the
+        UI, where a silent failure is indistinguishable from a success. With
+        several PODs and only a partial failure the action succeeds - something
+        was imported - and the failed PODs stay in the logs.
         """
         if pod is not None and pod not in self.pods:
             raise ServiceValidationError(
@@ -663,5 +655,5 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
 
     @property
     def api(self) -> ApiClient:
-        """Espone il client API per chiamate on-demand."""
+        """Expose the API client for on-demand calls."""
         return self._api

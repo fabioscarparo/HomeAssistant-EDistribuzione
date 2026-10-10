@@ -1,25 +1,25 @@
-"""Import delle curve E-Distribuzione come external statistics in Home Assistant.
+"""Import of E-Distribuzione curves as external statistics in Home Assistant.
 
-Pipeline (dalla richiesta raw_storage.py/coordinator.py in su):
+Pipeline (from the raw_storage.py/coordinator.py request upward):
 
-    API E-Distribuzione (96 campioni/giorno, sampleFrequency=15)
-        -> raw_storage: upsert dei campioni a 15' (source of truth, SQLite)
-        -> _aggrega_ore: bucket orari dalla serie COMPLETA già in raw_storage
-        -> external statistics HA (statistic_id orario, sum cumulativa)
+    E-Distribuzione API (96 samples/day, sampleFrequency=15)
+        -> raw_storage: upsert of the 15-minute samples (source of truth, SQLite)
+        -> _aggrega_ore: hourly buckets from the FULL series already in raw_storage
+        -> HA external statistics (hourly statistic_id, cumulative sum)
         -> Energy Dashboard
 
-Il raw a 15 minuti in raw_storage.py è la source of truth: ad ogni import si
-rilegge TUTTA la serie mai importata per quel POD/direzione (non solo il
-periodo appena scaricato) e si ricalcolano da zero bucket orari + sum
-cumulativa. Questo è ciò che rende il risultato finale deterministico e
-indipendente dall'ordine di importazione: una rettifica di un giorno vecchio
-di mesi corregge automaticamente quell'ora E tutte le sum successive, senza
-nessuna logica speciale per "quali ore sono cambiate" - si ricalcola tutto,
-è già abbastanza economico per i volumi in gioco (poche decine di migliaia
-di righe anche su 6 mesi di storico).
+The 15-minute raw data in raw_storage.py is the source of truth: on every
+import the WHOLE series ever imported for that POD/direction is re-read (not
+only the period just downloaded) and the hourly buckets + cumulative sum are
+recomputed from scratch. This is what makes the final result deterministic and
+independent of the import order: a correction to a day months old automatically
+fixes that hour AND all the following sums, with no special logic for "which
+hours changed" - everything is recomputed, which is cheap enough for the
+volumes involved (a few tens of thousands of rows even over 6 months of
+history).
 
-Schema JSON di una risposta di ApiClient.async_get_daily_load_profile (vedi
-raw_storage.estrai_campioni per il parsing):
+JSON shape of an ApiClient.async_get_daily_load_profile response (see
+raw_storage.estrai_campioni for the parsing):
 
     [
       {
@@ -38,45 +38,43 @@ raw_storage.estrai_campioni per il parsing):
       }
     ]
 
-'initialSample' è un timestamp UTC assoluto e completo del campione id=1:
-il timestamp di ogni campione si ottiene sommando (id-1) * sampleFrequency
-minuti - deterministico, nessuna interpretazione di flag per il cambio ora
-richiesta. Verificato aritmeticamente su dati reali: id=1 cade esattamente a
-mezzanotte locale del giorno richiesto, id=96 sull'ultimo quarto d'ora dello
-stesso giorno locale.
+'initialSample' is a full absolute UTC timestamp of sample id=1: each sample's
+timestamp is obtained by adding (id-1) * sampleFrequency minutes - deterministic,
+no flag interpretation for the clock change. id=1 falls exactly at local
+midnight of the requested day, id=96 on the last quarter-hour of the same local
+day.
 
-'val' è energia in kWh per intervallo di 15 minuti, non potenza media in kW -
-verificato confrontando il totale della curva per un mese intero con il
-delta di due letture ufficiali consecutive (async_get_reading), stessa cifra
-fino alla terza cifra decimale.
+'val' is energy in kWh per 15-minute interval, not average power in kW: the
+total of a full month's curve matches the delta of two consecutive official
+readings (async_get_reading) down to the third decimal.
 
-Ogni POD ha DUE serie distinte, una per direzione dell'energia:
+Each POD has TWO distinct series, one per energy direction:
 
-    edistribuzione:<pod>_energia            prelevata (MAGNITUDE_PRELEVATA)
-    edistribuzione:<pod>_energia_immessa    immessa (MAGNITUDE_IMMESSA)
+    edistribuzione:<pod>_energia            consumption (MAGNITUDE_PRELEVATA)
+    edistribuzione:<pod>_energia_immessa    injection (MAGNITUDE_IMMESSA)
 
-Per le direzioni in DIREZIONI_CON_FASCE (oggi solo la prelevata) si
-scrivono anche tre serie per fascia ARERA, ricalcolate dagli stessi
-campioni a 15' e con gli stessi timestamp orari della serie totale:
+For the directions in DIREZIONI_CON_FASCE (today only consumption) three more
+series are written, one per ARERA band, recomputed from the same 15-minute
+samples and with the same hourly timestamps as the total series:
 
     edistribuzione:<pod>_energia_f1 / _f2 / _f3
 
-Non vanno aggiunte alla Energy Dashboard insieme alla serie totale (il
-prelievo verrebbe contato due volte): o la totale, o le tre fasce.
+They must not be added to the Energy Dashboard together with the total series
+(consumption would be counted twice): either the total, or the three bands.
 
-La direzione la decide chi chiama async_import_curva_giornaliera (quale
-magnitude ha chiesto all'API), non questo modulo: qui non si interpreta
-'energyType' per instradare i dati, solo per fidarsi di chi ci passa i dati
-già separati per direzione - così l'aggregazione resta identica in entrambi i
-casi e più facile da testare. La stessa stringa (MAGNITUDE_PRELEVATA/
-MAGNITUDE_IMMESSA, cioè "A1"/"A2") è anche la chiave 'direzione' usata in
-raw_storage, per non dover mantenere due vocabolari paralleli.
+The direction is decided by whoever calls async_import_curva_giornaliera (which
+magnitude it requested from the API), not by this module: 'energyType' is not
+interpreted here to route the data, only to trust the caller that passes the
+data already split by direction - so the aggregation stays identical in both
+cases and easier to test. The same string (MAGNITUDE_PRELEVATA/MAGNITUDE_IMMESSA,
+i.e. "A1"/"A2") is also the 'direzione' key used in raw_storage, to avoid
+keeping two parallel vocabularies.
 
-Le due direzioni NON vanno confuse con il RUOLO del POD scelto dall'utente
-(contatore di scambio o di produzione): la direzione dice cosa ha misurato
-E-Distribuzione, il ruolo dice cosa rappresenta quel contatore nell'impianto.
-Il ruolo arriva dal chiamante tramite il parametro 'nome' e influenza solo
-l'etichetta visibile, mai quali dati vengono scritti.
+The two directions must NOT be confused with the POD ROLE chosen by the user
+(exchange or production meter): the direction says what E-Distribuzione
+measured, the role says what that meter represents in the system. The role
+reaches here from the caller via the 'nome' parameter and only affects the
+visible label, never which data is written.
 """
 from __future__ import annotations
 
@@ -103,8 +101,8 @@ _LOGGER = logging.getLogger(__name__)
 def _sanitize_statistic_id(
     pod: str, *, immessa: bool = False, fascia: str | None = None
 ) -> str:
-    """Uno statistic_id per POD e direzione, e opzionalmente per fascia
-    ARERA (fasce.F1/F2/F3)."""
+    """A statistic_id per POD and direction, and optionally per ARERA band
+    (fasce.F1/F2/F3)."""
     slug = re.sub(r"[^a-z0-9_]", "_", pod.lower())
     suffisso = "_energia_immessa" if immessa else "_energia"
     if fascia is not None:
@@ -113,20 +111,20 @@ def _sanitize_statistic_id(
 
 
 def statistic_ids(pod: str) -> tuple[str, str]:
-    """(prelevata, immessa) statistic_id per questo POD - punto di accesso
-    pubblico per chi (es. energy_dashboard.py) deve sapere quali statistiche
-    esistono per un POD senza replicare la logica di naming."""
+    """(consumption, injection) statistic_id for this POD - public entry point
+    for whoever (e.g. energy_dashboard.py) needs to know which statistics exist
+    for a POD without replicating the naming logic."""
     return _sanitize_statistic_id(pod), _sanitize_statistic_id(pod, immessa=True)
 
 
 def statistic_ids_fasce(pod: str) -> dict[str, str]:
-    """{fascia: statistic_id} delle serie per fascia della prelevata."""
+    """{band: statistic_id} of the per-band consumption series."""
     return {f: _sanitize_statistic_id(pod, fascia=f) for f in fasce.FASCE}
 
 
 def _serie_cumulativa(ore: list[tuple[datetime, float]]) -> list[dict]:
-    """Righe per async_add_external_statistics: state = kWh dell'ora,
-    sum = cumulativa dall'inizio della serie."""
+    """Rows for async_add_external_statistics: state = kWh of the hour,
+    sum = cumulative from the start of the series."""
     running_sum = 0.0
     stats = []
     for inizio_ora, kwh in ore:
@@ -140,8 +138,8 @@ def _metadata(statistic_id: str, nome: str) -> dict:
         "has_mean": False,
         "mean_type": StatisticMeanType.NONE,
         "has_sum": True,
-        # Riscritto a ogni import: cambiare il ruolo del POD nelle opzioni si
-        # propaga da solo al primo aggiornamento successivo, senza migrazioni.
+        # Rewritten on every import: changing the POD role in the options
+        # propagates by itself on the next update, with no migrations.
         "name": nome,
         "source": DOMAIN,
         "statistic_id": statistic_id,
@@ -151,15 +149,15 @@ def _metadata(statistic_id: str, nome: str) -> dict:
 
 
 def _aggrega_ore(campioni: list[tuple[datetime, float]]) -> list[tuple[datetime, float]]:
-    """Bucket orari da campioni a 15 minuti GIA' estratti (vedi
-    raw_storage.estrai_campioni) - pura somma per ora, nessun parsing qui.
+    """Hourly buckets from 15-minute samples ALREADY extracted (see
+    raw_storage.estrai_campioni) - plain sum per hour, no parsing here.
 
-    Riceve la serie COMPLETA di un POD/direzione (tutto ciò che c'è in
-    raw_storage, non solo l'ultimo import): è così che una rettifica su un
-    singolo campione di mesi fa ricalcola correttamente quell'ora specifica,
-    senza dover sapere in anticipo quali ore sono "cambiate".
+    Receives the FULL series of a POD/direction (everything in raw_storage, not
+    just the last import): this is how a correction on a single sample from
+    months ago correctly recomputes that specific hour, without having to know
+    in advance which hours "changed".
 
-    Restituisce una lista di (inizio_ora_utc_aware, kwh_totali) ordinata.
+    Returns an ordered list of (hour_start_utc_aware, total_kwh).
     """
     bucket: dict[datetime, float] = defaultdict(float)
     for ts, kwh in campioni:
@@ -176,23 +174,22 @@ async def async_import_curva_giornaliera(
     immessa: bool = False,
     nome: str | None = None,
 ) -> date | None:
-    """Importa i campioni a 15 minuti di una direzione: upsert nella source
-    of truth (raw_storage), poi ricalcolo completo dei bucket orari + sum
-    cumulativa da TUTTA la serie mai importata per questo POD/direzione, e
-    scrittura come external statistics.
+    """Import the 15-minute samples of one direction: upsert into the source of
+    truth (raw_storage), then full recompute of the hourly buckets + cumulative
+    sum from the WHOLE series ever imported for this POD/direction, and write as
+    external statistics.
 
-    'immessa' sceglie la serie di destinazione (vedi _sanitize_statistic_id)
-    e la chiave 'direzione' in raw_storage; 'nome' è l'etichetta mostrata
-    nella Energy Dashboard, che dipende dal ruolo assegnato al POD e arriva
-    quindi dal chiamante.
+    'immessa' selects the target series (see _sanitize_statistic_id) and the
+    'direzione' key in raw_storage; 'nome' is the label shown in the Energy
+    Dashboard, which depends on the role assigned to the POD and therefore comes
+    from the caller.
 
-    L'operazione è idempotente: ri-important dati identici produce upsert
-    che non cambiano nulla, e il ricalcolo completo della sum non dipende
-    dall'ordine di arrivo (storico prima o dopo i dati recenti, retry,
-    rettifiche).
+    The operation is idempotent: re-importing identical data produces upserts
+    that change nothing, and the full sum recompute does not depend on the
+    arrival order (history before or after recent data, retries, corrections).
 
-    Restituisce la data locale dell'ultimo punto della serie risultante, o
-    None se non c'è nulla da importare.
+    Returns the local date of the last point of the resulting series, or None if
+    there is nothing to import.
     """
     if not dati_grezzi:
         _LOGGER.debug("Nessun dato curva da importare per POD %s (immessa=%s)", pod, immessa)
@@ -231,8 +228,8 @@ async def async_import_curva_giornaliera(
     ore = _aggrega_ore(tutti_campioni)
 
     if not ore:
-        # Non dovrebbe succedere (abbiamo appena upsertato dei campioni),
-        # ma non fidarsi mai di una lista non vuota che diventa vuota altrove.
+        # Should not happen (we just upserted samples), but never trust a
+        # non-empty list that becomes empty elsewhere.
         _LOGGER.warning("POD %s (immessa=%s): raw_storage vuoto dopo l'upsert", pod, immessa)
         return None
 
@@ -242,10 +239,10 @@ async def async_import_curva_giornaliera(
     async_add_external_statistics(hass, _metadata(statistic_id, nome_serie), stats)
 
     if direzione in DIREZIONI_CON_FASCE:
-        # Stessa source of truth, stesso ricalcolo completo: anche le serie
-        # per fascia si correggono da sole con le rettifiche, e la prima
-        # volta si popolano con TUTTO lo storico già presente in
-        # raw_storage, senza bisogno di rilanciare recupera_storico.
+        # Same source of truth, same full recompute: the per-band series also
+        # correct themselves with corrections, and the first time they are
+        # populated with ALL the history already in raw_storage, without having
+        # to run recupera_storico again.
         ore_per_fascia = fasce.aggrega_ore_per_fascia(tutti_campioni)
         for f, ore_fascia in ore_per_fascia.items():
             async_add_external_statistics(
@@ -268,16 +265,16 @@ async def async_import_curva_giornaliera(
 
 
 async def _ultima_data_serie(hass: HomeAssistant, statistic_id: str) -> date | None:
-    """Ultima data (locale) presente in una singola serie, o None se vuota.
+    """Last date (local) present in a single series, or None if empty.
 
-    Interroga il Recorder (non raw_storage): questo è un controllo di
-    presenza/freschezza della external statistic VISIBILE nella Energy
-    Dashboard, usato dal coordinator per decidere se bootstrap-are un POD
-    nuovo - non la ricostruzione della serie (quella usa sempre raw_storage,
-    vedi async_import_curva_giornaliera). Se il Recorder perde i suoi dati
-    (es. corruzione del DB), è corretto che questo torni None: vogliamo che
-    il coordinator si comporti come un POD nuovo e ripopoli la Energy
-    Dashboard, non che pensi erroneamente di essere già aggiornato.
+    Queries the Recorder (not raw_storage): this is a presence/freshness check
+    of the external statistic VISIBLE in the Energy Dashboard, used by the
+    coordinator to decide whether to bootstrap a new POD - not the series
+    rebuild (that always uses raw_storage, see async_import_curva_giornaliera).
+    If the Recorder loses its data (e.g. DB corruption), it is correct for this
+    to return None: we want the coordinator to behave like a new POD and
+    repopulate the Energy Dashboard, not to wrongly think it is already up to
+    date.
     """
     last_stats = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 1, statistic_id, True, {"sum"}
@@ -294,15 +291,15 @@ async def _ultima_data_serie(hass: HomeAssistant, statistic_id: str) -> date | N
 
 
 async def async_get_ultima_data_disponibile(hass: HomeAssistant, pod: str) -> date | None:
-    """Ultima data (locale) effettivamente presente nelle external statistics
-    per il POD, o None se non c'è ancora nessun dato importato.
+    """Last date (local) actually present in the external statistics for the
+    POD, or None if no data has been imported yet.
 
-    Guarda ENTRAMBE le direzioni e restituisce la più avanzata: un POD di
-    sola produzione può non avere niente nella serie prelevata, e guardando
-    solo quella il coordinator ne concluderebbe che non è mai arrivato nulla,
-    richiedendo ogni giorno un intervallo già importato. Le due direzioni
-    arrivano dalla stessa richiesta, quindi normalmente avanzano insieme: il
-    max serve per il caso in cui una delle due non esista.
+    Looks at BOTH directions and returns the most recent: a production-only POD
+    may have nothing in the consumption series, and looking only at that one the
+    coordinator would conclude that nothing ever arrived, requesting an already
+    imported range every day. The two directions come from the same request, so
+    they normally advance together: the max is for the case where one of them
+    does not exist.
     """
     date_per_direzione = [
         await _ultima_data_serie(hass, _sanitize_statistic_id(pod, immessa=immessa))

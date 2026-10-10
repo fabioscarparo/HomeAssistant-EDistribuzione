@@ -1,18 +1,17 @@
-"""Testi visibili che Home Assistant non sa tradurre con translations/*.json.
+"""Visible texts that Home Assistant cannot translate via translations/*.json.
 
-Nomi di entità, config flow, azioni ed eccezioni passano dai file di
-traduzione e seguono la lingua del profilo di ciascun utente. Restano fuori
-alcune stringhe che HA tratta come dati semplici, senza chiave di
-traduzione:
+Entity names, config flow, actions and exceptions go through the translation
+files and follow each user's profile language. A few strings stay out, which HA
+treats as plain data with no translation key:
 
-- il modello dei dispositivi (DeviceInfo traduce solo il nome);
-- il nome delle external statistics, salvato nei metadati del Recorder;
-- i description_placeholders del config flow, sostituiti tali e quali.
+- the device model (DeviceInfo translates only the name);
+- the external statistics name, stored in the Recorder metadata;
+- the config flow description_placeholders, substituted as-is.
 
-Per queste si usa la lingua del server (hass.config.language): italiano se
-è una variante di "it", altrimenti inglese, come il fallback di HA.
+For these the server language is used (hass.config.language): Italian if it is
+a variant of "it", otherwise English, like HA's fallback.
 
-Modulo puro, senza dipendenze da Home Assistant.
+Pure module, no Home Assistant dependencies.
 """
 from __future__ import annotations
 
@@ -77,12 +76,12 @@ TESTI: dict[str, dict[str, str]] = {
 
 
 def lingua_supportata(lingua: str | None) -> str:
-    """'it', 'it-IT' -> 'it'; tutto il resto (anche None) -> inglese."""
+    """'it', 'it-IT' -> 'it'; everything else (None included) -> English."""
     base = (lingua or "").split("-")[0].split("_")[0].lower()
     return base if base in TESTI else LINGUA_PREDEFINITA
 
 
 def testo(lingua: str | None, chiave: str, **segnaposto: str) -> str:
-    """Testo per 'chiave' nella lingua indicata, con i segnaposto sostituiti."""
+    """Text for 'chiave' in the given language, with placeholders substituted."""
     valore = TESTI[lingua_supportata(lingua)][chiave]
     return valore.format(**segnaposto) if segnaposto else valore

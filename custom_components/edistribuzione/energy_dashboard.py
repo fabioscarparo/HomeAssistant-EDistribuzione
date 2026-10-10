@@ -1,19 +1,17 @@
-"""Configurazione automatica (idempotente) della Energy Dashboard.
+"""Automatic (idempotent) Energy Dashboard configuration.
 
-Aggiunge alle sorgenti della Energy Dashboard le statistiche dei POD
-configurati, in base al ruolo scelto per ciascuno (vedi
-EdistribuzioneCoordinator.tipo_pod):
+Adds the configured PODs' statistics to the Energy Dashboard sources, based on
+the role chosen for each one (see EdistribuzioneCoordinator.tipo_pod):
 
-- scambio: una sorgente "grid" con la prelevata come import e l'immessa
-  come export;
-- produzione: una sorgente "solar" con l'immessa come produzione (la
-  prelevata di un POD di produzione resta disponibile ma non va in Energy
-  Dashboard - tipicamente lo stand-by dell'inverter, non un consumo reale).
+- exchange: a "grid" source with consumption as import and injection as export;
+- production: a "solar" source with injection as production (the consumption of
+  a production POD stays available but does not go into the Energy Dashboard -
+  typically the inverter's standby, not real consumption).
 
-Non sovrascrive né duplica: se esiste già una sorgente con lo stesso
-statistic_id di import (grid) o di produzione (solar), viene lasciata
-intatta - comprese eventuali configurazioni di costo che l'utente ha
-aggiunto a mano nell'interfaccia. Richiamabile più volte in sicurezza.
+It does not overwrite or duplicate: if a source with the same import (grid) or
+production (solar) statistic_id already exists, it is left intact - including
+any cost configuration the user added by hand in the UI. Safe to call multiple
+times.
 """
 from __future__ import annotations
 
@@ -36,18 +34,18 @@ _LOGGER = logging.getLogger(__name__)
 async def async_configura_energy_dashboard(
     hass: HomeAssistant, coordinators: list[EdistribuzioneCoordinator]
 ) -> list[str]:
-    """Aggiunge le sorgenti mancanti per tutti i POD dei coordinator passati.
+    """Add the missing sources for every POD of the given coordinators.
 
-    Ritorna le etichette (POD + ruolo) effettivamente aggiunte; vuota se non
-    c'era nulla da aggiungere (già tutto configurato in precedenza).
+    Returns the labels (POD + role) actually added; empty if there was nothing
+    to add (already fully configured).
     """
     manager = await async_get_manager(hass)
     sorgenti: list[SourceType] = list(manager.data["energy_sources"]) if manager.data else []
 
-    # Un POD è "già configurato" se il suo statistic_id compare come import
-    # (grid o solar) o come export (grid) di una sorgente esistente,
-    # indipendentemente da chi l'abbia creata (questa azione o l'utente a
-    # mano): non ha senso aggiungerne una seconda per lo stesso dato.
+    # A POD is "already configured" if its statistic_id appears as import (grid
+    # or solar) or as export (grid) of an existing source, whoever created it
+    # (this action or the user by hand): adding a second one for the same data
+    # makes no sense.
     from_esistenti = {
         s.get("stat_energy_from") for s in sorgenti if s.get("type") in ("grid", "solar")
     }

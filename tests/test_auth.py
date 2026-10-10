@@ -546,10 +546,24 @@ class TestAccessoBloccato:
     def test_e_un_auth_error(self):
         assert issubclass(auth.AccessoBloccato, auth.AuthError)
 
-    async def test_refresh_del_token_bloccato(self):
-        session = _SessioneACoda([_RispostaToken(PAGINA_ANTIBOT)])
+    async def test_refresh_bloccato_su_entrambi_gli_host(self):
+        """Primario e host diretto entrambi bloccati: si prova il primario, poi
+        il diretto, e solo allora si solleva AccessoBloccato."""
+        session = _SessioneACoda([_RispostaToken(PAGINA_ANTIBOT), _RispostaToken(PAGINA_ANTIBOT)])
         with pytest.raises(auth.AccessoBloccato):
             await auth.AuthClient(session).async_refresh_access_token("rt")
+        host_provati = [u["url"].split("/")[2] for u in session.post_inviati]
+        assert host_provati == ["private.e-distribuzione.it", "edistribuzione.my.site.com"]
+
+    async def test_refresh_fallback_sul_dominio_diretto(self):
+        """Primario bloccato, host diretto ok: il refresh riesce via il dominio
+        diretto, senza sollevare eccezioni."""
+        session = _SessioneACoda(
+            [_RispostaToken(PAGINA_ANTIBOT), _RispostaToken('{"access_token": "nuovo"}')]
+        )
+        tokens = await auth.AuthClient(session).async_refresh_access_token("rt")
+        assert tokens.access_token == "nuovo"
+        assert session.post_inviati[-1]["url"].split("/")[2] == "edistribuzione.my.site.com"
 
     async def test_refresh_con_una_pagina_html_qualunque_e_un_parsing_error(self):
         session = _SessioneACoda([_RispostaToken("<html>manutenzione</html>")])

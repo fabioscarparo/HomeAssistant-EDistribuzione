@@ -1,23 +1,23 @@
-"""Storage dei campioni a 15 minuti (source of truth) per POD e direzione.
+"""Storage of the 15-minute samples (source of truth) per POD and direction.
 
-Un file SQLite indipendente dal database del Recorder - mai lo stesso file:
-vogliamo poter ricostruire le external statistics anche se il Recorder perde
-i suoi dati (già successo una volta, DB corrotto), senza dover richiedere di
-nuovo lo storico a E-Distribuzione, e senza nessuna contesa sul file del
-Recorder. Schema minimo, una tabella:
+A SQLite file independent of the Recorder database - never the same file: we
+want to be able to rebuild the external statistics even if the Recorder loses
+its data (it happened once, a corrupted DB), without having to request the
+history from E-Distribuzione again, and with no contention on the Recorder
+file. Minimal schema, one table:
 
     campioni(pod, direzione, timestamp_utc, kwh)
     PRIMARY KEY (pod, direzione, timestamp_utc)
 
-L'upsert su questa chiave è la source of truth per le correzioni: se
-E-Distribuzione rettifica un campione già importato, la stessa riga viene
-sovrascritta, non duplicata.
+The upsert on this key is the source of truth for corrections: if
+E-Distribuzione revises a sample already imported, the same row is overwritten,
+not duplicated.
 
-Ogni funzione qui è sincrona (bloccante, sqlite3 stdlib) - il chiamante
-(statistics.py) la esegue via hass.async_add_executor_job, mai direttamente
-nell'event loop. Nessuna dipendenza da Home Assistant se non dt_util per il
-calcolo del timestamp (stessa aritmetica già usata altrove nel progetto),
-così resta testabile con un semplice tmp_path, senza fixture 'hass'.
+Every function here is synchronous (blocking, stdlib sqlite3) - the caller
+(statistics.py) runs it via hass.async_add_executor_job, never directly in the
+event loop. No Home Assistant dependency except dt_util for the timestamp
+computation (the same arithmetic already used elsewhere in the project), so it
+stays testable with a plain tmp_path, without the 'hass' fixture.
 """
 from __future__ import annotations
 
@@ -44,35 +44,35 @@ NOME_FILE_DEFAULT = "edistribuzione_curve.db"
 
 
 def percorso_predefinito(hass: HomeAssistant) -> str:
-    """File dedicato dentro la cartella di configurazione, a fianco (non
-    dentro) home-assistant_v2.db - un file nostro, un solo scrittore
-    (questa integrazione), nessuna condivisione col Recorder."""
+    """Dedicated file in the configuration folder, next to (not inside)
+    home-assistant_v2.db - our own file, a single writer (this integration),
+    no sharing with the Recorder."""
     return hass.config.path(NOME_FILE_DEFAULT)
 
 
 def _connetti(db_path: str) -> sqlite3.Connection:
     con = sqlite3.connect(db_path, timeout=5)
-    # Difesa standard contro "database is locked" se mai due chiamate si
-    # sovrappongono (ogni chiamata apre/chiude la propria connessione breve,
-    # non ne condivide una tra thread): attende invece di fallire subito.
+    # Standard defence against "database is locked" in case two calls ever
+    # overlap (each call opens/closes its own short connection, does not share
+    # one across threads): it waits instead of failing immediately.
     con.execute("PRAGMA busy_timeout = 5000")
     con.execute(_SCHEMA)
     return con
 
 
 def estrai_campioni(dati_grezzi: list[dict]) -> list[tuple[datetime, float]]:
-    """Estrae (timestamp_utc, kwh) da una risposta di
-    ApiClient.async_get_daily_load_profile - un dict per giorno, ciascuno
-    con fino a 96 campioni da 15 minuti.
+    """Extract (timestamp_utc, kwh) from an
+    ApiClient.async_get_daily_load_profile response - one dict per day, each
+    with up to 96 fifteen-minute samples.
 
-    Il timestamp di ogni campione è initialSample (UTC assoluto, id=1) +
-    (id-1) * sampleFrequency minuti - nessuna logica manuale di ora legale,
-    il server gestisce già il cambio nel timestamp assoluto (vedi il
-    docstring di statistics.py per la verifica aritmetica su dati reali).
+    Each sample's timestamp is initialSample (absolute UTC, id=1) +
+    (id-1) * sampleFrequency minutes - no manual daylight-saving logic, the
+    server already handles the change in the absolute timestamp (see the
+    statistics.py docstring for the arithmetic check).
 
-    Righe con campi mancanti o non parsabili vengono scartate con un
-    warning invece di far fallire l'intero import: un singolo campione
-    corrotto non deve perdere il resto della giornata.
+    Rows with missing or unparseable fields are dropped with a warning instead
+    of failing the whole import: a single corrupted sample must not lose the
+    rest of the day.
     """
     campioni: list[tuple[datetime, float]] = []
 
@@ -122,9 +122,9 @@ def estrai_campioni(dati_grezzi: list[dict]) -> list[tuple[datetime, float]]:
 def upsert_campioni(
     db_path: str, pod: str, direzione: str, campioni: list[tuple[datetime, float]]
 ) -> None:
-    """Scrive i campioni, sovrascrivendo il valore se (pod, direzione,
-    timestamp) esiste già - è così che una rettifica successiva di
-    E-Distribuzione sostituisce il valore vecchio invece di affiancarlo."""
+    """Write the samples, overwriting the value if (pod, direzione, timestamp)
+    already exists - this is how a later correction from E-Distribuzione
+    replaces the old value instead of sitting beside it."""
     if not campioni:
         return
     righe = [(pod, direzione, int(ts.timestamp()), kwh) for ts, kwh in campioni]
@@ -144,10 +144,11 @@ def upsert_campioni(
 
 
 def leggi_campioni(db_path: str, pod: str, direzione: str) -> list[tuple[datetime, float]]:
-    """Tutti i campioni mai importati per questo POD/direzione, ordinati per
-    timestamp - è la source of truth da cui statistics.py ricostruisce da
-    zero l'intera serie oraria e la sum cumulativa ad ogni import, così il
-    risultato non dipende dall'ordine di arrivo di storico/rettifiche/retry."""
+    """All the samples ever imported for this POD/direction, ordered by
+    timestamp - the source of truth from which statistics.py rebuilds the whole
+    hourly series and the cumulative sum from scratch on every import, so the
+    result does not depend on the order in which history/corrections/retries
+    arrive."""
     con = _connetti(db_path)
     try:
         righe = con.execute(

@@ -1,30 +1,30 @@
-"""Testa il vero codice di login/API (auth.py + api.py) da terminale, senza
-Home Assistant nel mezzo - molto più veloce che passare dalla UI ad ogni
-tentativo.
+"""Test the real login/API code (auth.py + api.py) from the terminal, without
+Home Assistant in the middle - much faster than going through the UI on every
+attempt.
 
-Copre l'intera catena: email/password -> OTP -> recupero POD
-(async_get_supplies), lo stesso percorso del config flow reale.
+Covers the whole chain: email/password -> OTP -> POD retrieval
+(async_get_supplies), the same path as the real config flow.
 
-Include anche la SONDA del vocabolario 'magnitude' di
-querydailyloadprofile: il codice di produzione chiede "A1" (prelevata,
-confermato) e "A2" (immessa, NON CONFERMATO - vedi const.py). Questo script
-prova più candidati e confronta i risultati, per stabilire con quale valore
-si ottiene davvero l'energia immessa prima di fidarsene in produzione.
+It also PROBES the 'magnitude' vocabulary of querydailyloadprofile: the
+production code requests "A1" (consumption, confirmed) and "A2" (injection, NOT
+confirmed - see const.py). This script tries several candidates and compares the
+results, to establish which value actually returns injected energy before
+trusting it in production.
 
-Dopo un login riuscito salva il refresh_token in refresh_token.txt (file
-locale, escluso da git): al lancio successivo lo script offre di testare
-SOLO il refresh (async_refresh_access_token), senza rifare email/password/OTP.
+After a successful login it saves the refresh_token to refresh_token.txt (local
+file, excluded from git): on the next run the script offers to test ONLY the
+refresh (async_refresh_access_token), without redoing email/password/OTP.
 
-Importa auth.py/api.py/const.py DIRETTAMENTE, bypassando __init__.py (che
-importa homeassistant, non installato qui e non necessario: nessuno dei tre
-moduli dipende da Home Assistant, solo da aiohttp e libreria standard).
+It imports auth.py/api.py/const.py DIRECTLY, bypassing __init__.py (which
+imports homeassistant, not installed here and not needed: none of the three
+modules depend on Home Assistant, only on aiohttp and the standard library).
 
-Uso:
+Usage:
     pip install aiohttp
     python3 scripts/verify_login.py
 
-La password viene letta con getpass (non appare a schermo, non resta nella
-history del terminale).
+The password is read with getpass (it does not appear on screen and does not
+stay in the terminal history).
 """
 from __future__ import annotations
 
@@ -44,8 +44,8 @@ PKG_DIR = REPO_ROOT / "custom_components" / "edistribuzione"
 
 
 def _load_modules():
-    """Carica const.py, auth.py e api.py come un mini-pacchetto isolato,
-    senza eseguire __init__.py (che richiede homeassistant). Ritorna
+    """Load const.py, auth.py and api.py as an isolated mini-package, without
+    running __init__.py (which requires homeassistant). Returns
     (const, auth, api)."""
     if not PKG_DIR.exists():
         sys.exit(
@@ -74,33 +74,32 @@ def _load_modules():
 
 REFRESH_TOKEN_FILE = Path("refresh_token.txt")
 
-# Candidati per il valore di 'magnitude' che restituisce l'energia immessa
-# su MuleSoft (querydailyloadprofile). "A1" e' il riferimento (prelevata,
-# CONFERMATO): ogni altro candidato viene confrontato con lui per scoprire
-# se il server lo onora o lo ignora silenziosamente (nel qual caso torna lo
-# stesso identico totale di "A1" - il caso peggiore, perche' senza questo
-# confronto sembrerebbe un successo). Il "Magnitude: A+/A-" della cattura
-# HAR del PORTALE WEB non e' incluso di proposito: quel vocabolario
-# appartiene a un backend diverso (Aura, non MuleSoft) e provarlo qui non
-# direbbe nulla su questa API - va tenuto distinto, non dato per buono.
+# Candidates for the 'magnitude' value that returns injected energy on MuleSoft
+# (querydailyloadprofile). "A1" is the reference (consumption, confirmed): every
+# other candidate is compared against it to find out whether the server honours
+# it or silently ignores it (in which case it returns the exact same total as
+# "A1" - the worst case, because without this comparison it would look like a
+# success). The web portal's "Magnitude: A+/A-" is deliberately not included:
+# that vocabulary belongs to a different backend (Aura, not MuleSoft) and trying
+# it here would say nothing about this API.
 MAGNITUDE_RIFERIMENTO = "A1"
 MAGNITUDE_CANDIDATE = [MAGNITUDE_RIFERIMENTO, "A2", "A-", "A+", "A3"]
 
 FUSO_ITALIA = ZoneInfo("Europe/Rome")
 
-# Ore locali considerate "notte" per il controllo di forma fotovoltaico: se
-# una curva e' davvero produzione FV, qui deve essere praticamente zero.
+# Local hours considered "night" for the photovoltaic shape check: if a curve is
+# really PV production, it should be practically zero here.
 ORE_NOTTURNE = set(range(0, 5)) | set(range(21, 24))
 
 
 def _analizza_curva(curva: list[dict]) -> dict:
-    """Riassume una risposta di querydailyloadprofile per il confronto tra
-    magnitude: totale kWh, giorni ricevuti, energyType/timeType restituiti e
-    ripartizione notte/giorno in ora locale italiana.
+    """Summarise a querydailyloadprofile response for the magnitude comparison:
+    total kWh, days received, energyType/timeType returned and the night/day
+    split in Italian local time.
 
-    energyType e' il campo decisivo: rimanda indietro la magnitude che il
-    server ha SERVITO, non quella richiesta. Se non coincide con quella
-    chiesta, la richiesta e' stata ignorata.
+    energyType is the decisive field: it echoes back the magnitude the server
+    SERVED, not the one requested. If it does not match the one requested, the
+    request was ignored.
     """
     totale = 0.0
     notte = 0.0
@@ -156,9 +155,8 @@ def _analizza_curva(curva: list[dict]) -> dict:
 
 
 async def _sonda_magnitude(api_client, pod: str, giorno_da: date, giorno_a: date) -> dict:
-    """Chiede la curva una volta per ogni candidato e stampa un confronto.
-    Ritorna {magnitude: curva} per i soli candidati che hanno restituito dei
-    campioni."""
+    """Request the curve once per candidate and print a comparison. Returns
+    {magnitude: curva} for the candidates that returned samples."""
     curve: dict[str, list[dict]] = {}
     analisi: dict[str, dict] = {}
 
@@ -168,7 +166,7 @@ async def _sonda_magnitude(api_client, pod: str, giorno_da: date, giorno_a: date
             curva = await api_client.async_get_daily_load_profile(
                 pod, giorno_da, giorno_a, magnitude=magnitude
             )
-        except Exception as exc:  # noqa: BLE001 - una magnitude rifiutata non deve fermare la sonda
+        except Exception as exc:  # noqa: BLE001 - a rejected magnitude must not stop the probe
             print(f"  RIFIUTATA: {type(exc).__name__}: {exc}")
             continue
 
@@ -247,8 +245,8 @@ async def _sonda_magnitude(api_client, pod: str, giorno_da: date, giorno_a: date
 
 
 async def _test_refresh_soltanto(auth) -> None:
-    """Testa async_refresh_access_token con il token salvato da un login
-    precedente, senza rifare email/password/OTP."""
+    """Test async_refresh_access_token with the token saved from a previous
+    login, without redoing email/password/OTP."""
     refresh_token_salvato = REFRESH_TOKEN_FILE.read_text(encoding="utf-8").strip()
 
     import aiohttp
@@ -399,8 +397,8 @@ async def main() -> None:
                 f"{p.get('PointOfMeasureMunicipality', '')} "
                 f"({p.get('PointOfMeasureProvince', '')})"
             ).strip()
-            # HasPlant e' l'unico metadato di getSupplies che potrebbe
-            # distinguere un POD con impianto di produzione.
+            # HasPlant is the only getSupplies metadata that might distinguish a
+            # POD with a production plant.
             print(f"  [{i}] {p.get('IdPod')} - {indirizzo}   HasPlant={p.get('HasPlant')!r}")
 
         if not pods:
@@ -478,11 +476,11 @@ async def main() -> None:
                 return
 
             def _somma_ea(lettura: dict) -> float:
-                """Somma i valori 'EA' (energia attiva) di tutte le fasce
-                (publishedSlots) in una singola lettura cumulativa. Le fasce
-                non attive sul contratto hanno "value": null (chiave
-                presente, valore nullo) - .get("value", 0) non lo
-                intercetta, va gestito a parte."""
+                """Sum the 'EA' (active energy) values of all the bands
+                (publishedSlots) in a single cumulative reading. The bands not
+                active on the contract have "value": null (key present, null
+                value) - .get("value", 0) does not catch it, it must be handled
+                separately."""
                 return sum(
                     float(slot.get("value") or 0)
                     for slot in lettura.get("publishedSlots", [])

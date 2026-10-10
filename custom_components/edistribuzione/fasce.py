@@ -1,26 +1,25 @@
-"""Fasce orarie ARERA (F1/F2/F3) per i campioni della curva di carico.
+"""ARERA time bands (F1/F2/F3) for load-curve samples.
 
-Definizione (delibera ARERA 181/06 e s.m.i.):
+Definition (ARERA resolution 181/06 and later amendments):
 
-    F1  lun-ven 08:00-19:00, festivi esclusi
-    F2  lun-ven 07:00-08:00 e 19:00-23:00; sabato 07:00-23:00; festivi esclusi
-    F3  lun-sab 00:00-07:00 e 23:00-24:00; domenica e festivi tutto il giorno
+    F1  Mon-Fri 08:00-19:00, holidays excluded
+    F2  Mon-Fri 07:00-08:00 and 19:00-23:00; Saturday 07:00-23:00; holidays excluded
+    F3  Mon-Sat 00:00-07:00 and 23:00-24:00; Sundays and holidays all day
 
-Le fasce sono definite sull'ora legale ITALIANA: qui si converte sempre in
-Europe/Rome in modo esplicito, invece di usare dt_util.as_local, così il
-risultato non dipende dal fuso configurato in Home Assistant.
+The bands are defined on ITALIAN local time: this module always converts to
+Europe/Rome explicitly, rather than using dt_util.as_local, so the result does
+not depend on the time zone configured in Home Assistant.
 
-Due proprietà del calendario rendono la classificazione priva di casi limite:
+Two properties of the calendar keep the classification free of edge cases:
 
-- i confini di fascia cadono sempre sull'ora piena, quindi un campione da
-  15' (identificato dal suo istante di INIZIO, come in raw_storage) non è
-  mai a cavallo di due fasce;
-- i cambi d'ora cadono sempre di domenica (ultima di marzo/ottobre), cioè
-  in giornate interamente F3: l'ora "doppia" e quella "mancante" non
-  toccano mai F1/F2.
+- band boundaries always fall on the full hour, so a 15-minute sample
+  (identified by its START instant, as in raw_storage) is never split across
+  two bands;
+- clock changes always fall on a Sunday (last of March/October), i.e. on
+  fully-F3 days: the "doubled" and "missing" hour never touch F1/F2.
 
-Modulo puro, senza dipendenze da Home Assistant: testabile con pytest
-semplice (vedi tests/test_fasce.py).
+Pure module, no Home Assistant dependencies: testable with plain pytest (see
+tests/test_fasce.py).
 """
 from __future__ import annotations
 
@@ -31,12 +30,12 @@ from zoneinfo import ZoneInfo
 
 FUSO_ITALIA = ZoneInfo("Europe/Rome")
 
-# In minuscolo perché diventano il suffisso dello statistic_id.
+# Lowercase because they become the statistic_id suffix.
 F1, F2, F3 = "f1", "f2", "f3"
 FASCE = (F1, F2, F3)
 
-# Le 11 festività storiche elencate nei documenti ARERA/contrattuali; la
-# Pasquetta è mobile e viene aggiunta a parte.
+# The 11 traditional holidays listed in ARERA/contract documents; Easter Monday
+# is movable and added separately.
 _FESTIVITA_FISSE = (
     (1, 1),    # Capodanno
     (1, 6),    # Epifania
@@ -50,21 +49,19 @@ _FESTIVITA_FISSE = (
     (12, 26),  # Santo Stefano
 )
 
-# 4 ottobre, San Francesco: festa nazionale dalla L. 151/2025, in vigore dal
-# 1/1/2026. La delibera ARERA esclude genericamente "le festività
-# nazionali", ma gli elenchi pubblicati finora riportano ancora le 11
-# storiche e non è confermato che i calendari dei contatori siano stati
-# aggiornati. Nel 2026 cade di domenica (F3 comunque): il primo caso reale
-# è lunedì 4 ottobre 2027 - da verificare allora contro le letture
-# ufficiali per fascia, e se E-Distribuzione non lo considera festivo
-# basta mettere False qui.
+# October 4, San Francesco: a national holiday under Law 151/2025, in force
+# from 2026. The ARERA resolution excludes "national holidays" generically, but
+# the published lists still show the 11 traditional ones and it is not certain
+# that the meters' calendars have been updated. In 2026 it falls on a Sunday
+# (F3 anyway): the first real case is Monday October 4, 2027. Set this to False
+# if E-Distribuzione does not treat it as a holiday.
 SAN_FRANCESCO_FESTIVO = True
 _SAN_FRANCESCO_DAL = 2026
 
 
 def pasqua(anno: int) -> date:
-    """Domenica di Pasqua nel calendario gregoriano (algoritmo
-    anonimo di Meeus/Jones/Butcher)."""
+    """Easter Sunday in the Gregorian calendar (anonymous
+    Meeus/Jones/Butcher algorithm)."""
     a = anno % 19
     b, c = divmod(anno, 100)
     d, e = divmod(b, 4)
@@ -81,36 +78,36 @@ def pasqua(anno: int) -> date:
 @lru_cache(maxsize=128)
 def _festivita(anno: int, san_francesco: bool) -> frozenset[date]:
     giorni = {date(anno, mese, giorno) for mese, giorno in _FESTIVITA_FISSE}
-    giorni.add(pasqua(anno) + timedelta(days=1))  # Lunedì dell'Angelo
+    giorni.add(pasqua(anno) + timedelta(days=1))  # Easter Monday
     if san_francesco and anno >= _SAN_FRANCESCO_DAL:
         giorni.add(date(anno, 10, 4))
     return frozenset(giorni)
 
 
 def festivita(anno: int) -> frozenset[date]:
-    """Festività che valgono come F3 nell'anno indicato.
+    """Holidays that count as F3 in the given year.
 
-    Il flag viene letto a ogni chiamata (e fa parte della chiave di cache),
-    così cambiare SAN_FRANCESCO_FESTIVO ha effetto subito.
+    The flag is read on every call (and is part of the cache key), so changing
+    SAN_FRANCESCO_FESTIVO takes effect immediately.
     """
     return _festivita(anno, SAN_FRANCESCO_FESTIVO)
 
 
 def fascia(istante: datetime) -> str:
-    """Fascia ARERA di un istante aware (per un campione: il suo inizio)."""
+    """ARERA band of an aware instant (for a sample: its start)."""
     if istante.tzinfo is None:
         raise ValueError("fascia() richiede un datetime con fuso orario (aware)")
 
     locale = istante.astimezone(FUSO_ITALIA)
     giorno = locale.date()
     ora = locale.hour
-    giorno_settimana = locale.weekday()  # 0 = lunedì ... 6 = domenica
+    giorno_settimana = locale.weekday()  # 0 = Monday ... 6 = Sunday
 
     if giorno_settimana == 6 or giorno in festivita(giorno.year):
         return F3
     if ora < 7 or ora >= 23:
         return F3
-    if giorno_settimana == 5:  # sabato
+    if giorno_settimana == 5:  # Saturday
         return F2
     if 8 <= ora < 19:
         return F1
@@ -120,17 +117,17 @@ def fascia(istante: datetime) -> str:
 def aggrega_ore_per_fascia(
     campioni: list[tuple[datetime, float]],
 ) -> dict[str, list[tuple[datetime, float]]]:
-    """Bucket orari per fascia, dagli stessi campioni a 15' (UTC aware) che
-    statistics._aggrega_ore somma per la serie totale.
+    """Hourly buckets per band, from the same 15-minute samples (UTC aware)
+    that statistics._aggrega_ore sums for the total series.
 
-    Ogni serie contiene TUTTE le ore in cui esiste almeno un campione, con
-    0 kWh nelle ore che appartengono a un'altra fascia. Le tre serie hanno
-    quindi esattamente gli stessi timestamp della serie totale, la loro sum
-    cumulativa avanza in parallelo, e F1 + F2 + F3 = totale ora per ora.
+    Each series contains ALL the hours in which at least one sample exists, with
+    0 kWh in the hours that belong to another band. The three series therefore
+    have exactly the same timestamps as the total series, their cumulative sum
+    advances in parallel, and F1 + F2 + F3 = total hour by hour.
 
-    La fascia si decide campione per campione (non per ora): con
-    sampleFrequency=15 è indifferente, ma resta corretto anche se un giorno
-    arrivassero intervalli diversi.
+    The band is decided sample by sample (not per hour): with sampleFrequency=15
+    it makes no difference, but it stays correct even if a day arrived with
+    different intervals.
     """
     bucket: dict[str, dict[datetime, float]] = {f: defaultdict(float) for f in FASCE}
     ore: set[datetime] = set()

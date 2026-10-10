@@ -1,7 +1,7 @@
-"""Sensori diagnostici E-Distribuzione: i dati veri finiscono nelle external
-statistics (statistics.py). Questi sensori servono solo a vedere a colpo
-d'occhio lo stato dell'import - non un sensore per ogni fascia/grandezza,
-solo il minimo per capire se l'integrazione sta funzionando.
+"""E-Distribuzione diagnostic sensors: the real data goes into the external
+statistics (statistics.py). These sensors only give an at-a-glance view of the
+import status - not one sensor per band/magnitude, just the minimum to tell
+whether the integration is working.
 """
 from __future__ import annotations
 
@@ -25,16 +25,16 @@ from .testi import testo
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Punto d'ingresso della piattaforma sensor, chiamato da Home Assistant."""
+    """Sensor platform entry point, called by Home Assistant."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(build_entities(hass, coordinator))
 
 
 def _device_info_account(entry: ConfigEntry, lingua: str | None) -> DeviceInfo:
-    """Dispositivo "genitore" per tutti i POD di questa config entry.
+    """"Parent" device for all the PODs of this config entry.
 
-    Il "model" non ha chiave di traduzione in HA: segue la lingua del
-    server (vedi testi.py)."""
+    The "model" has no translation key in HA: it follows the server language
+    (see testi.py)."""
     return DeviceInfo(
         identifiers={(DOMAIN, entry.entry_id)},
         name="E-Distribuzione",
@@ -46,11 +46,11 @@ def _device_info_account(entry: ConfigEntry, lingua: str | None) -> DeviceInfo:
 def _device_info_pod(
     entry: ConfigEntry, pod: str, ruolo: str, lingua: str | None, id_padre: str | None = None
 ) -> DeviceInfo:
-    """Dispositivo per un singolo POD, agganciato all'account.
+    """Device for a single POD, linked to the account.
 
-    Il "model" dipende dal ruolo scelto dall'utente (vedi
-    EdistribuzioneCoordinator.tipo_pod) - puramente cosmetico, non
-    influenza quali dati vengono richiesti."""
+    The "model" depends on the role chosen by the user (see
+    EdistribuzioneCoordinator.tipo_pod) - purely cosmetic, it does not affect
+    which data is requested."""
     chiave = "modello_produzione" if ruolo == TIPO_POD_PRODUZIONE else "modello_prelievo"
     info = DeviceInfo(
         identifiers={(DOMAIN, f"{entry.entry_id}_{pod}")},
@@ -62,13 +62,13 @@ def _device_info_pod(
 
 
 def build_entities(hass, coordinator: EdistribuzioneCoordinator) -> list[SensorEntity]:
-    """Costruisce le entità sensor per una config entry: un dispositivo per
-    ciascun POD configurato più uno "account" comune."""
+    """Build the sensor entities for a config entry: one device per configured
+    POD plus a shared "account" one."""
     entry = coordinator.entry
 
-    # Il dispositivo "account" va registrato PRIMA di quelli per POD, che lo
-    # referenziano come padre: su HA 2026.8+ serve il suo ID interno, che
-    # esiste solo dopo la registrazione.
+    # The "account" device must be registered BEFORE the per-POD ones, which
+    # reference it as parent: on HA 2026.8+ its internal id is needed, and that
+    # exists only after registration.
     id_padre = assicura_dispositivo_padre(
         hass, entry.entry_id, dict(_device_info_account(entry, coordinator.lingua))
     )
@@ -82,9 +82,9 @@ def build_entities(hass, coordinator: EdistribuzioneCoordinator) -> list[SensorE
 
 
 class PodConfiguratiSensor(SensorEntity):
-    """Mostra quanti POD sono configurati in questa istanza - vive sul
-    dispositivo "account", la cui esistenza reale è anche ciò che fa
-    funzionare via_device dei dispositivi per-POD."""
+    """Shows how many PODs are configured in this instance - lives on the
+    "account" device, whose real existence is also what makes via_device of the
+    per-POD devices work."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "pod_configurati"
@@ -106,9 +106,9 @@ class PodConfiguratiSensor(SensorEntity):
 class UltimaDataDisponibileSensor(
     CoordinatorEntity[EdistribuzioneCoordinator], RestoreEntity, SensorEntity
 ):
-    """Mostra l'ultima data per cui sono realmente arrivati dati (in almeno
-    una delle due direzioni) per un POD - legge lo stato reale delle
-    external statistics, non solo se l'ultimo ciclo è girato con successo."""
+    """Shows the last date for which data actually arrived (in at least one of
+    the two directions) for a POD - reads the real state of the external
+    statistics, not just whether the last cycle ran successfully."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "ultima_data_disponibile"
@@ -132,9 +132,8 @@ class UltimaDataDisponibileSensor(
         self._ripristinato: date | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Recupera l'ultimo valore noto dopo un riavvio: i dati del
-        coordinator vivono in memoria e restano vuoti finché non gira un
-        ciclo che li ripopola."""
+        """Restore the last known value after a restart: the coordinator data
+        lives in memory and stays empty until a cycle repopulates it."""
         await super().async_added_to_hass()
         ultimo_stato = await self.async_get_last_state()
         if ultimo_stato and ultimo_stato.state not in (None, "unknown", "unavailable"):
@@ -155,10 +154,10 @@ class UltimaDataDisponibileSensor(
 class ConsumoGiornoSensor(
     CoordinatorEntity[EdistribuzioneCoordinator], RestoreEntity, SensorEntity
 ):
-    """Energia (kWh) dell'ultimo giorno importato per UNA direzione di un
-    POD. Volutamente senza state_class 'energy': quel valore vive sulle
-    external statistics (statistics.py), non qui - questo sensore è solo
-    diagnostico."""
+    """Energy (kWh) of the last imported day for ONE direction of a POD.
+    Deliberately without the 'energy' state_class: that value lives in the
+    external statistics (statistics.py), not here - this sensor is diagnostic
+    only."""
 
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -187,9 +186,9 @@ class ConsumoGiornoSensor(
 
     @staticmethod
     def _chiave_traduzione(coordinator: EdistribuzioneCoordinator, pod: str, immessa: bool) -> str:
-        """Chiave del nome in translations/*.json, dipendente dal ruolo
-        scelto dall'utente per questo POD - stessa etichetta della
-        statistica corrispondente (vedi EdistribuzioneCoordinator._nome_serie)."""
+        """Name key in translations/*.json, depending on the role chosen by the
+        user for this POD - same label as the matching statistic (see
+        EdistribuzioneCoordinator._nome_serie)."""
         if coordinator.tipo_pod(pod) == TIPO_POD_PRODUZIONE:
             return "produzione_ultimo_giorno" if immessa else "prelievo_tecnico_ultimo_giorno"
         return "immissione_ultimo_giorno" if immessa else "prelievo_ultimo_giorno"

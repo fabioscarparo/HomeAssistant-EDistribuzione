@@ -1,6 +1,6 @@
-"""Integrazione edistribuzione: login E-Distribuzione, curve di carico
-prelevata/immessa per POD, importate come external statistics nella Energy
-Dashboard di Home Assistant.
+"""edistribuzione integration: E-Distribuzione login, consumption/injection
+load curves per POD, imported as external statistics into Home Assistant's
+Energy Dashboard.
 """
 from __future__ import annotations
 
@@ -37,11 +37,10 @@ SCHEMA_RECUPERA_STORICO = vol.Schema({
 def _risolvi_coordinator_e_pod_da_device(
     hass: HomeAssistant, device_id: str
 ) -> tuple[EdistribuzioneCoordinator, str | None]:
-    """Da un device_id (scelto dal selettore 'device' nel form dell'azione,
-    popolato dinamicamente con i dispositivi reali dell'integrazione) risale
-    al coordinator e, se si tratta di un dispositivo per singolo POD, al POD
-    specifico. Ritorna pod=None per il dispositivo "account" (recupero su
-    tutti i POD della entry insieme).
+    """From a device_id (chosen in the action's 'device' selector, populated
+    with the integration's real devices) resolve the coordinator and, if it is
+    a single-POD device, the specific POD. Returns pod=None for the "account"
+    device (fetch over all the entry's PODs together).
     """
     dev_reg = dr.async_get(hass)
     device = dev_reg.async_get(device_id)
@@ -52,10 +51,10 @@ def _risolvi_coordinator_e_pod_da_device(
             translation_placeholders={"device_id": device_id},
         )
 
-    # Ricerca "a ritroso" tra le config entry attive di questa integrazione,
-    # invece di leggere device.config_entries (deprecato dalla
-    # ristrutturazione del device registry di HA 2026.8/2026.9 in favore dei
-    # nuovi config_entry_id/config_subentry_id singoli).
+    # "Backwards" search across this integration's active config entries,
+    # instead of reading device.config_entries (deprecated by the HA 2026.8/
+    # 2026.9 device registry rework in favour of the new single
+    # config_entry_id/config_subentry_id).
     entry_id = next(
         (
             eid
@@ -84,7 +83,7 @@ def _risolvi_coordinator_e_pod_da_device(
 
 
 async def _async_registra_servizi(hass: HomeAssistant) -> None:
-    """Registra le azioni dell'integrazione (una sola volta)."""
+    """Register the integration's actions (once)."""
     if hass.services.has_service(DOMAIN, SERVICE_RECUPERA_STORICO):
         return
 
@@ -114,30 +113,29 @@ async def _async_registra_servizi(hass: HomeAssistant) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Inizializza l'integrazione a partire da una config entry."""
+    """Set up the integration from a config entry."""
     coordinator = EdistribuzioneCoordinator(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await _async_registra_servizi(hass)
     await async_registra_card(hass)
-    # HA tiene nascosto un avviso ignorato anche quando viene ricreato con lo
-    # stesso nome. Azzerandolo qui, a ogni avvio o ricaricamento, il primo
-    # aggiornamento lo ricrea visibile se l'accesso è ancora bloccato:
-    # ignorarlo lo nasconde solo fino al prossimo ricaricamento.
+    # HA keeps an ignored notice hidden even when it is recreated with the same
+    # name. Clearing it here, on every start or reload, lets the first update
+    # recreate it visible if access is still blocked: ignoring it only hides it
+    # until the next reload.
     ir.async_delete_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
-    # async_config_entry_first_refresh SOLLEVA ConfigEntryNotReady se il
-    # primo refresh fallisce, e HA riprova il setup più tardi. Va fatto PRIMA
-    # di inoltrare le piattaforme: altrimenti al nuovo tentativo HA rifiuta
-    # di inoltrarle una seconda volta ("has already been setup") e i sensori
-    # restano assenti fino al riavvio - succede se E-Distribuzione non
-    # risponde proprio mentre Home Assistant si avvia.
+    # async_config_entry_first_refresh RAISES ConfigEntryNotReady if the first
+    # refresh fails, and HA retries the setup later. It must run BEFORE
+    # forwarding the platforms: otherwise, on the retry, HA refuses to forward
+    # them a second time ("has already been setup") and the sensors stay absent
+    # until a restart - which happens if E-Distribuzione does not answer right
+    # while Home Assistant is starting.
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady:
-        # Con l'accesso bloccato dalla verifica antibot, i nuovi tentativi
-        # di setup di HA (fino a uno ogni 10 minuti) vorrebbero dire
-        # insistere proprio contro quel blocco: il setup si completa e il
-        # coordinator riprova al suo ritmo normale, una volta l'ora.
-        # L'avviso in Riparazioni spiega perché i dati sono fermi.
+        # With access blocked by the anti-bot check, HA's setup retries (up to
+        # one every 10 minutes) would mean hammering exactly that block: the
+        # setup completes and the coordinator retries at its normal rate, once
+        # an hour. The Repairs notice explains why the data is stuck.
         if not coordinator.accesso_bloccato:
             raise
         _LOGGER.warning(
@@ -149,7 +147,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Scarica la config entry."""
+    """Unload the config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unload_ok:
         return False

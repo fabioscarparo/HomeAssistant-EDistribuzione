@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+### Fixed
+- When private.e-distribuzione.it is blocked by Imperva's anti-bot check, login and token
+  refresh fall back to the canonical Salesforce host edistribuzione.my.site.com, which is not
+  behind Imperva. The custom domain stays the primary, so the integration returns to it on its
+  own once the block is lifted. Thanks to @paki81 for finding the alternative host.
+
 ## 0.5.2
 ### Changed
 - *Report issue* in Home Assistant now opens this repository's issues, instead of the original

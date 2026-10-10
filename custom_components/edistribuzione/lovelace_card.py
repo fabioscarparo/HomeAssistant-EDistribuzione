@@ -1,16 +1,15 @@
-"""Card Lovelace del POD, servita dall'integrazione stessa.
+"""POD Lovelace card, served by the integration itself.
 
-Il file JS sta in frontend/ dentro il pacchetto dell'integrazione: lo si
-espone come percorso statico e lo si registra come modulo extra del
-frontend, così la card compare nel selettore delle card senza dover
-aggiungere a mano una risorsa Lovelace (né installare un secondo repository
-HACS di tipo "plugin").
+The JS file lives in frontend/ inside the integration package: it is exposed as
+a static path and registered as an extra frontend module, so the card shows up
+in the card picker without adding a Lovelace resource by hand (nor installing a
+second "plugin" HACS repository).
 
-Il file è servito con cache_headers=True, cioè in cache per 31 giorni: il
-parametro ?v=<impronta del contenuto> cambia appena cambia il file, così
-browser e app companion scaricano la card nuova. Legarlo alla versione del
-manifest non bastava: un commit senza aumento di versione (il fork non
-pubblica release) lasciava in cache la card precedente.
+The file is served with cache_headers=True, i.e. cached for 31 days: the
+?v=<content hash> parameter changes as soon as the file changes, so browsers and
+the companion app download the new card. Tying it to the manifest version was
+not enough: a commit without a version bump (the fork publishes no releases)
+left the previous card cached.
 """
 from __future__ import annotations
 
@@ -32,16 +31,16 @@ _CHIAVE_REGISTRATA = f"{DOMAIN}_card_registrata"
 
 
 def impronta_file(percorso: Path = PERCORSO_FILE) -> str:
-    """Prime 12 cifre esadecimali dello SHA-256 del file della card."""
+    """First 12 hex digits of the card file's SHA-256."""
     return hashlib.sha256(percorso.read_bytes()).hexdigest()[:12]
 
 
 async def async_registra_card(hass: HomeAssistant) -> None:
-    """Registra percorso statico e modulo frontend, una sola volta per avvio.
+    """Register the static path and frontend module, once per start.
 
-    Non fa nulla se http o frontend non sono attivi (es. nei test, o in
-    un'installazione senza interfaccia): la card è un di più, non deve mai
-    impedire il setup dell'integrazione.
+    Does nothing if http or frontend are not active (e.g. in tests, or in a
+    headless install): the card is a bonus, it must never block the integration
+    setup.
     """
     if hass.data.get(_CHIAVE_REGISTRATA):
         return
@@ -49,9 +48,9 @@ async def async_registra_card(hass: HomeAssistant) -> None:
         _LOGGER.debug("http/frontend non attivi: card Lovelace non registrata")
         return
 
-    # Import locali: frontend/http sono after_dependencies, non dipendenze
-    # dure, e importarli in cima trascinerebbe il pacchetto del frontend
-    # anche dove non serve.
+    # Local imports: frontend/http are after_dependencies, not hard
+    # dependencies, and importing them at the top would pull in the frontend
+    # package even where it is not needed.
     from homeassistant.components.frontend import add_extra_js_url
     from homeassistant.components.http import StaticPathConfig
 

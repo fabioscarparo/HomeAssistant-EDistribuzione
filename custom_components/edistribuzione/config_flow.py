@@ -1,12 +1,11 @@
-"""Config flow di edistribuzione.
+"""edistribuzione config flow.
 
-Flusso di setup: user (email+password) -> otp -> pod (multi-select tra i POD
-dell'account). Reauth: gli stessi step user/otp (distinti da un ramo interno
-su self._reauth_entry), senza tornare a scegliere i POD - solo il
-refresh_token della entry esistente viene aggiornato.
+Setup flow: user (email+password) -> otp -> pod (multi-select among the
+account's PODs). Reauth: the same user/otp steps (told apart by an internal
+branch on self._reauth_entry), without going back to choosing the PODs - only
+the existing entry's refresh_token is updated.
 
-Niente selezione di distributore o comune: un solo distributore, un solo
-flusso.
+No distributor or municipality selection: a single distributor, a single flow.
 """
 from __future__ import annotations
 
@@ -46,9 +45,9 @@ from .testi import testo
 
 _LOGGER = logging.getLogger(__name__)
 
-# Il codice OTP è Optional (non Required) perché lo stesso form serve anche a
-# richiedere un nuovo codice senza averne uno da inserire: chi non ha
-# ricevuto nulla spunta la casella e sottomette il form vuoto.
+# The OTP code is Optional (not Required) because the same form also serves to
+# request a new code without having one to enter: whoever received nothing ticks
+# the box and submits the empty form.
 STEP_OTP_SCHEMA = vol.Schema({
     vol.Optional("otp", default=""): str,
     vol.Optional("richiedi_nuovo_codice", default=False): bool,
@@ -56,9 +55,9 @@ STEP_OTP_SCHEMA = vol.Schema({
 
 
 def _etichetta_pod(pod_info: dict) -> str:
-    """'IT001E12345678 - Via Roma 1, Milano (MI)' invece del solo codice
-    POD nel selettore, così si riconosce a colpo d'occhio quale immobile è
-    senza dover controllare altrove."""
+    """'IT001E12345678 - Via Roma 1, Milano (MI)' instead of just the POD code
+    in the selector, so you can tell at a glance which property it is without
+    looking elsewhere."""
     indirizzo = (
         f"{pod_info.get('PointOfMeasureStreetPrefix', '')} "
         f"{pod_info.get('PointOfMeasureStreet', '')} "
@@ -70,7 +69,7 @@ def _etichetta_pod(pod_info: dict) -> str:
 
 
 class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Config flow per l'integrazione edistribuzione."""
+    """Config flow for the edistribuzione integration."""
 
     VERSION = 1
 
@@ -83,7 +82,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
     def _testo(self, chiave: str, **segnaposto: str) -> str:
-        """Testo per i description_placeholders, che HA non traduce: vedi testi.py."""
+        """Text for the description_placeholders, which HA does not translate: see testi.py."""
         return testo(self.hass.config.language, chiave, **segnaposto)
 
     # ------------------------------------------------------------------
@@ -91,12 +90,12 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
 
     async def _reinvia_otp(self) -> tuple[str | None, str | None]:
-        """Richiede un nuovo OTP dentro la sessione di login corrente.
+        """Request a new OTP within the current login session.
 
-        È l'unico modo di ottenere un codice valido per Home Assistant
-        quando il primo non arriva: un OTP generato sul sito o nell'app
-        appartiene a un'altra sessione di login e non può essere convalidato
-        qui. Ritorna (chiave_errore, avviso) da passare al form.
+        It is the only way to get a code valid for Home Assistant when the first
+        one does not arrive: an OTP generated on the website or in the app
+        belongs to another login session and cannot be validated here. Returns
+        (error_key, notice) to pass to the form.
         """
         try:
             confermato = await self._auth.async_resend_otp()
@@ -106,7 +105,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except AccessoBloccato:
             _LOGGER.warning("Reinvio OTP: E-Distribuzione ha risposto con la verifica antibot")
             return "accesso_bloccato", None
-        except Exception:  # noqa: BLE001 - vedi commento in async_step_user
+        except Exception:  # noqa: BLE001 - see comment in async_step_user
             _LOGGER.exception("Reinvio del codice OTP fallito")
             return "cannot_connect", None
         return None, self._testo("otp_reinviato" if confermato else "otp_invio_non_confermato")
@@ -120,11 +119,11 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def _otp_senza_codice(self, user_input: dict[str, Any], avviso: str):
-        """Gestisce i submit del form OTP che non portano un codice da
-        convalidare: richiesta di un nuovo codice, o campo lasciato vuoto.
+        """Handle OTP form submits that carry no code to validate: a request for
+        a new code, or an empty field.
 
-        Ritorna il form da mostrare, oppure None se c'è un codice e si può
-        procedere con async_submit_otp.
+        Returns the form to show, or None if there is a code and we can proceed
+        with async_submit_otp.
         """
         if user_input.get("richiedi_nuovo_codice"):
             errore, avviso_reinvio = await self._reinvia_otp()
@@ -134,10 +133,10 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return None
 
     def _avviso_iniziale(self) -> str:
-        """Avviso da mostrare la prima volta che si arriva sul form OTP:
-        segnala il caso in cui il portale non ha confermato l'invio del
-        codice (l'utente aspetterebbe altrimenti un OTP che non arriverà
-        mai, senza che nulla glielo dica)."""
+        """Notice to show the first time the OTP form is reached: flags the case
+        where the portal did not confirm that the code was sent (otherwise the
+        user would wait for an OTP that never arrives, with nothing telling
+        them)."""
         if getattr(self._auth, "otp_invio_confermato", None) is False:
             return self._testo("otp_invio_non_confermato")
         return self._testo("otp_solo_da_qui")
@@ -146,14 +145,12 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Sessione dedicata (non quella condivisa di Home Assistant):
-            # questo login passa per una catena di redirect Salesforce che
-            # dipende da un cookie di sessione impostato a metà strada, che
-            # la sessione condivisa non garantisce di persistere in modo
-            # affidabile per questo dominio - il sintomo è un loop di
-            # redirect infinito perché il server non vede mai tornare il
-            # cookie. Creata una volta e riusata tra i retry di questo
-            # stesso flow.
+            # Dedicated session (not Home Assistant's shared one): this login
+            # goes through a Salesforce redirect chain that depends on a session
+            # cookie set halfway through, which the shared session does not
+            # reliably persist for this domain - the symptom is an infinite
+            # redirect loop because the server never sees the cookie come back.
+            # Created once and reused across retries of this same flow.
             if self._session is None:
                 self._session = async_create_clientsession(self.hass)
             self._auth = AuthClient(self._session)
@@ -163,24 +160,24 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except InvalidCredentials:
                 errors["base"] = "invalid_auth"
             except TroppeSessioni:
-                # Credenziali giuste, ma l'account ha troppe sessioni aperte:
-                # nessun OTP viene inviato, non ha senso proseguire allo step
-                # successivo a chiederlo.
+                # Right credentials, but the account has too many open sessions:
+                # no OTP is sent, so there is no point moving to the next step to
+                # ask for it.
                 _LOGGER.warning("Login rifiutato: troppe sessioni aperte sull'account")
                 errors["base"] = "troppe_sessioni"
             except AccessoBloccato:
-                # Prima di ParsingError: la pagina antibot non contiene i
-                # campi attesi, ma il problema non è un cambio di markup.
+                # Before ParsingError: the anti-bot page does not contain the
+                # expected fields, but the problem is not a markup change.
                 _LOGGER.warning("Login: E-Distribuzione ha risposto con la verifica antibot")
                 errors["base"] = "accesso_bloccato"
             except ParsingError:
                 _LOGGER.exception("Parsing della pagina di login fallito")
                 errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001 - qualunque altro errore imprevisto
-                # aiohttp.ClientError, timeout, risposta non-JSON dove ce ne
-                # aspettavamo una, o qualunque altra cosa che auth.py non
-                # incapsula nelle sue eccezioni dedicate: meglio un errore
-                # nel form (col traceback nei log) che far esplodere lo step.
+            except Exception:  # noqa: BLE001 - any other unexpected error
+                # aiohttp.ClientError, timeout, a non-JSON response where one was
+                # expected, or anything else auth.py does not wrap in its
+                # dedicated exceptions: better an error in the form (with the
+                # traceback in the logs) than blowing up the step.
                 _LOGGER.exception("Errore imprevisto durante il login")
                 errors["base"] = "cannot_connect"
             else:
@@ -194,8 +191,8 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _nota_reauth(self) -> str:
-        """Frase aggiuntiva mostrata solo durante un reauth, per ricordare
-        quali POD verranno riautenticati - vuota durante il setup iniziale."""
+        """Extra sentence shown only during a reauth, to recall which PODs will
+        be re-authenticated - empty during the initial setup."""
         if self._reauth_entry is None:
             return ""
         pods = ", ".join(self._reauth_entry.data.get(CONF_PODS, []))
@@ -220,15 +217,15 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.warning("Convalida OTP: E-Distribuzione ha risposto con la verifica antibot")
                 return self.async_abort(reason="accesso_bloccato")
             except ParsingError:
-                # A questo punto l'OTP è già stato accettato da Salesforce
-                # (altrimenti avremmo preso InvalidOtp sopra): il
-                # fallimento è nel parsing di uno step successivo, non nel
-                # codice inserito. Ririmostrare il form OTP non aiuta -
-                # l'OTP è monouso e il ViewState è già avanzato, un retry
-                # con lo stesso codice fallirebbe di nuovo allo stesso modo.
+                # At this point the OTP has already been accepted by Salesforce
+                # (otherwise we would have caught InvalidOtp above): the failure
+                # is in parsing a later step, not in the code entered. Showing
+                # the OTP form again does not help - the OTP is single-use and
+                # the ViewState has already advanced, a retry with the same code
+                # would fail again the same way.
                 _LOGGER.exception("Parsing della pagina OTP fallito")
                 return self.async_abort(reason="otp_exchange_failed")
-            except Exception:  # noqa: BLE001 - vedi commento in async_step_user
+            except Exception:  # noqa: BLE001 - see comment in async_step_user
                 _LOGGER.exception("Errore imprevisto durante lo scambio del codice OTP")
                 return self.async_abort(reason="otp_exchange_failed")
             else:
@@ -249,7 +246,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self._form_otp(errors, avviso)
 
     # ------------------------------------------------------------------
-    # Selezione POD (solo per il setup iniziale, non per il reauth)
+    # POD selection (initial setup only, not reauth)
     # ------------------------------------------------------------------
 
     async def async_step_pod(self, user_input: dict[str, Any] | None = None):
@@ -259,10 +256,10 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not self._pods_disponibili:
             try:
                 self._pods_disponibili = await api.async_get_supplies()
-            except Exception:  # noqa: BLE001 - vedi commento in async_step_user
-                # Login e OTP sono già andati a buon fine: un OTP è
-                # utilizzabile una sola volta, un retry di questo step non
-                # risolverebbe nulla senza rifare login+OTP da capo.
+            except Exception:  # noqa: BLE001 - see comment in async_step_user
+                # Login and OTP already succeeded: an OTP is single-use, so a
+                # retry of this step would not fix anything without redoing
+                # login+OTP from scratch.
                 _LOGGER.exception("Errore imprevisto nel recupero dei POD")
                 return self.async_abort(reason="supplies_failed")
 
@@ -276,7 +273,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data={CONF_PODS: pods, CONF_REFRESH_TOKEN: self._refresh_token},
             )
 
-        # Con un solo POD sull'account non serve far scegliere.
+        # With a single POD on the account there is nothing to choose.
         if len(self._pods_disponibili) == 1:
             return crea_entry([self._pods_disponibili[0]["IdPod"]])
 
@@ -302,7 +299,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         })
 
     # ------------------------------------------------------------------
-    # Reauth: stesso login+OTP, niente selezione POD
+    # Reauth: same login+OTP, no POD selection
     # ------------------------------------------------------------------
 
     async def async_step_reauth(self, entry_data: dict[str, Any]):
@@ -318,8 +315,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
-    """Ruolo del POD, aggiungi/rimuovi POD, orario della richiesta - dopo
-    la configurazione iniziale."""
+    """POD role, add/remove POD, request time - after the initial setup."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         return self.async_show_menu(
@@ -334,18 +330,17 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             nuovi_tipi = {pod: user_input[f"tipo_{pod}"] for pod in pods}
             nuove_opzioni = {**self.config_entry.options, CONF_TIPO_POD: nuovi_tipi}
-            # Aggiornata PRIMA del reload, cosi' i sensori vengono ricostruiti
-            # con il ruolo nuovo. async_create_entry(data=...) qui sotto
-            # sostituisce INTERAMENTE entry.options con 'data' quando
-            # l'options flow si conclude: un data={} azzererebbe anche
-            # CONF_ORA_RICHIESTA impostato in precedenza, quindi si rimanda
-            # lo stesso dizionario completo gia' applicato (nessuna doppia
-            # scrittura diversa, solo la conferma finale richiesta dal flow).
+            # Updated BEFORE the reload, so the sensors are rebuilt with the new
+            # role. async_create_entry(data=...) below REPLACES entry.options
+            # entirely with 'data' when the options flow ends: a data={} would
+            # also wipe a previously set CONF_ORA_RICHIESTA, so the same complete
+            # dict already applied is passed again (no different second write,
+            # just the final confirmation the flow requires).
             self.hass.config_entries.async_update_entry(self.config_entry, options=nuove_opzioni)
             await self.hass.config_entries.async_reload(self.config_entry.entry_id)
             return self.async_create_entry(title="", data=nuove_opzioni)
 
-        # Etichette in translations/*.json, sotto selector.tipo_pod.
+        # Labels in translations/*.json, under selector.tipo_pod.
         opzioni_ruolo = [TIPO_POD_SCAMBIO, TIPO_POD_PRODUZIONE]
         schema = {
             vol.Required(
@@ -388,10 +383,9 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
             new_data = {**self.config_entry.data, CONF_PODS: pods_finali}
             self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
             await self.hass.config_entries.async_reload(self.config_entry.entry_id)
-            # data=... qui è il dizionario di OPZIONI (non di data) con cui
-            # l'options flow si conclude: passare le opzioni correnti
-            # invariate, non {}, altrimenti azzererebbe CONF_TIPO_POD/
-            # CONF_ORA_RICHIESTA già impostati.
+            # data=... here is the OPTIONS dict (not data) the options flow ends
+            # with: pass the current options unchanged, not {}, otherwise it
+            # would wipe the already set CONF_TIPO_POD/CONF_ORA_RICHIESTA.
             return self.async_create_entry(title="", data=dict(self.config_entry.options))
 
         session = async_get_clientsession(self.hass)
@@ -449,8 +443,8 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
             new_data = {**self.config_entry.data, CONF_PODS: pods_rimasti}
             self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
             await self.hass.config_entries.async_reload(self.config_entry.entry_id)
-            # Vedi il commento in async_step_aggiungi_pod: 'data' qui sono le
-            # opzioni con cui il flow si conclude, non {}.
+            # See the comment in async_step_aggiungi_pod: 'data' here is the
+            # options the flow ends with, not {}.
             return self.async_create_entry(title="", data=dict(self.config_entry.options))
 
         return self.async_show_form(step_id="rimuovi_pod", data_schema=self._schema_rimuovi(pods))
