@@ -8,7 +8,24 @@ from __future__ import annotations
 DOMAIN = "edistribuzione"
 
 # --- Salesforce Experience Cloud (login / OAuth2 + PKCE) --------------------
-SF_BASE = "https://private.e-distribuzione.it/PortaleClienti"
+# Due hostname per la STESSA org Salesforce, stessa community PortaleClienti:
+# - private.e-distribuzione.it e' il dominio "custom" del portale, davanti a
+#   cui Enel ha messo Imperva (Incapsula): da ottobre 2026 risponde a
+#   qualunque client non-browser con la verifica antibot "Pardon Our
+#   Interruption", bloccando sia il login sia il refresh del token. Gli URL
+#   che il server genera (frontdoor.jsp, redirect JS, action dei form)
+#   puntano comunque a questo dominio: auth.py li riscrive su SF_HOST prima
+#   di seguirli, altrimenti si ricadrebbe nella verifica.
+# - edistribuzione.my.site.com e' il dominio canonico assegnato da Salesforce
+#   all'org: stessa pagina di login (fwuid/PED_Login/loginApp2 identici),
+#   stesso client_id OAuth, ma servito dalla CDN di Salesforce senza Imperva
+#   in mezzo. Verificato il 10/10/2026: authorize -> 302 sulla login page,
+#   loginUser -> "KO: Username non valido" con credenziali inventate, token
+#   endpoint -> validazione JSON reale dei parametri.
+SF_HOST = "edistribuzione.my.site.com"
+SF_HOST_BLOCCATO = "private.e-distribuzione.it"
+SF_ORIGIN = f"https://{SF_HOST}"
+SF_BASE = f"{SF_ORIGIN}/PortaleClienti"
 
 OAUTH_AUTHORIZE_URL = f"{SF_BASE}/services/oauth2/authorize"
 OAUTH_TOKEN_URL = f"{SF_BASE}/services/oauth2/token"

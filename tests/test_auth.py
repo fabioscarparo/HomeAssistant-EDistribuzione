@@ -383,7 +383,7 @@ class TestFormConsenso:
         action, dati = auth.AuthClient._estrai_form_consenso(HTML_PAGINA_CONSENSO)
         assert dati["save"] == "Consenti"
         assert action == (
-            "https://private.e-distribuzione.it/PortaleClienti/_ui/identity/oauth/ui/AuthorizationPage"
+            "https://edistribuzione.my.site.com/PortaleClienti/_ui/identity/oauth/ui/AuthorizationPage"
         )
 
     def test_rimanda_tutti_i_campi_hidden_deescapati(self):
@@ -486,6 +486,35 @@ class TestVerificaNonTroppeSessioni:
                 "sessioni contemporanee superate", "dump.html"
             )
         assert (tmp_path / "dump.html").exists()
+
+
+# ---------------------------------------------------------------------------
+# _url_via_host_diretto: gli URL che il server genera puntando al dominio
+# custom dietro Imperva vengono riscritti sul dominio *.my.site.com
+# ---------------------------------------------------------------------------
+
+
+class TestUrlViaHostDiretto:
+    def test_riscrive_il_dominio_protetto(self):
+        """Seguire un URL su private.e-distribuzione.it riporterebbe dentro
+        la verifica antibot "Pardon Our Interruption"."""
+        assert auth._url_via_host_diretto(
+            "https://private.e-distribuzione.it/PortaleClienti/secur/frontdoor.jsp?retURL=x"
+        ) == "https://edistribuzione.my.site.com/PortaleClienti/secur/frontdoor.jsp?retURL=x"
+
+    def test_lascia_invariato_l_host_diretto(self):
+        url = "https://edistribuzione.my.site.com/PortaleClienti/loginflow/loginFlow.apexp"
+        assert auth._url_via_host_diretto(url) == url
+
+    def test_lascia_invariati_altri_host_e_relativi(self):
+        """Solo l'esatto dominio protetto va riscritto: un hostname diverso
+        (anche dello stesso sito) passa com'è, e un path relativo resta
+        relativo per il join del chiamante."""
+        assert auth._url_via_host_diretto("https://example.com/x") == "https://example.com/x"
+        assert (
+            auth._url_via_host_diretto("/PortaleClienti/loginflow/loginFlow.apexp")
+            == "/PortaleClienti/loginflow/loginFlow.apexp"
+        )
 
 
 # ---------------------------------------------------------------------------

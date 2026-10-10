@@ -1,4 +1,9 @@
-"""Client di autenticazione per E-Distribuzione (private.e-distribuzione.it).
+"""Client di autenticazione per E-Distribuzione (edistribuzione.my.site.com).
+
+Il portale risponde su due hostname della stessa org Salesforce: quello
+"custom" (private.e-distribuzione.it) e' dietro Imperva e blocca i client
+non-browser, quindi si usa il dominio canonico *.my.site.com - stesso login,
+stessa community, senza verifica antibot. Dettagli in const.py.
 
 Login OAuth2 Authorization Code + PKCE standard, ma la parte difficile sta nel
 mezzo: le credenziali si sottomettono via un'azione Aura (Salesforce
@@ -51,6 +56,10 @@ from .const import (
     OAUTH_REDIRECT_URI,
     OAUTH_SCOPE,
     OAUTH_TOKEN_URL,
+    SF_BASE,
+    SF_HOST,
+    SF_HOST_BLOCCATO,
+    SF_ORIGIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -116,6 +125,22 @@ _ETICHETTE_CONSENSO = ("consenti", "allow", "approve", "autorizza", "accetta")
 def _contiene(testo: str, marcatori: tuple[str, ...]) -> bool:
     minuscolo = testo.lower()
     return any(marcatore in minuscolo for marcatore in marcatori)
+
+
+def _url_via_host_diretto(url: str) -> str:
+    """Riscrive su SF_HOST gli URL assoluti che il server genera puntando al
+    dominio custom protetto da Imperva (SF_HOST_BLOCCATO).
+
+    Salesforce conosce il proprio dominio pubblico e lo usa negli URL
+    assoluti che produce (returnValue di loginUser con frontdoor.jsp,
+    window.location della pagina-ponte, meta Location, action dei form):
+    seguirli così come sono riporterebbe dentro la verifica antibot che
+    SF_BASE aggira. URL relativi o su altri host passano invariati.
+    """
+    prefisso_bloccato = f"https://{SF_HOST_BLOCCATO}"
+    if url.startswith(prefisso_bloccato):
+        return f"https://{SF_HOST}" + url[len(prefisso_bloccato) :]
+    return url
 
 
 def _scrivi_pagina_debug(html: str, nome_file: str) -> None:
@@ -250,6 +275,10 @@ async def _get_following_redirects(
         resp.close()
         location_url = aiohttp.client.URL(location, encoded=True)
         next_url = location_url if location_url.is_absolute() else resp.url.join(location_url)
+        # Il Location puo' puntare al dominio custom dietro Imperva: va
+        # riscritto sull'host diretto o l'hop successivo trova la pagina
+        # antibot invece della destinazione.
+        next_url = aiohttp.client.URL(_url_via_host_diretto(str(next_url)), encoded=True)
         resp = await session.get(next_url, headers=headers, allow_redirects=False)
 
     resp.close()
@@ -447,7 +476,7 @@ class AuthClient:
             **headers,
             "X-SFDC-Page-Scope-Id": str(uuid.uuid4()),
             "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-            "Origin": "https://private.e-distribuzione.it",
+            "Origin": SF_ORIGIN,
             "Referer": referer,
         }
 
@@ -486,8 +515,9 @@ class AuthClient:
 
         # Seguirlo stabilisce il cookie di sessione 'sid' e atterra su una
         # pagina-ponte che fa un redirect via JAVASCRIPT (non HTTP) verso il
-        # vero form OTP - vedi _segui_a_pagina_otp.
-        return return_value[len("OK:") :]
+        # vero form OTP - vedi _segui_a_pagina_otp. L'URL arriva col dominio
+        # pubblico dietro Imperva: si riscrive sull'host diretto.
+        return _url_via_host_diretto(return_value[len("OK:") :])
 
     async def _segui_a_pagina_otp(self, frontdoor_url: str) -> str:
         """Passo 3: frontdoor.jsp stabilisce il cookie di sessione 'sid' e
@@ -502,7 +532,7 @@ class AuthClient:
         bridge_html = await _leggi_testo(resp)
         resp.close()
 
-        otp_form_url = self._estrai_url_redirect_js(bridge_html)
+        otp_form_url = _url_via_host_diretto(self._estrai_url_redirect_js(bridge_html))
         resp = await _get_following_redirects(self._session, otp_form_url, headers=headers)
         otp_page_html = await _leggi_testo(resp)
         resp.close()
@@ -643,8 +673,8 @@ class AuthClient:
             )
         next_url = unquote(loc_match.group(1))
         if next_url.startswith("/"):
-            next_url = "https://private.e-distribuzione.it" + next_url
-        return next_url
+            next_url = SF_ORIGIN + next_url
+        return _url_via_host_diretto(next_url)
 
     async def _scarica_pagina_dopo_otp(self, next_url: str) -> str:
         """Passo 6: GET della pagina a cui punta il redirect - di norma
@@ -724,8 +754,8 @@ class AuthClient:
         headers = {
             "User-Agent": _MOBILE_USER_AGENT,
             "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": "https://private.e-distribuzione.it",
-            "Referer": "https://private.e-distribuzione.it/PortaleClienti/",
+            "Origin": SF_ORIGIN,
+            "Referer": f"{SF_BASE}/",
         }
         # allow_redirects=False: il redirect punta allo schema custom
         # dell'app (eneldist://), che aiohttp non sa seguire - il codice sta
@@ -785,8 +815,8 @@ class AuthClient:
             if not action_url:
                 return None
             if action_url.startswith("/"):
-                action_url = "https://private.e-distribuzione.it" + action_url
-            return action_url, dati
+                action_url = SF_ORIGIN + action_url
+            return _url_via_host_diretto(action_url), dati
 
         return None
 
@@ -999,8 +1029,6 @@ class AuthClient:
         form_action = re.search(r'<form[^>]+action="([^"]+)"', html)
         if form_action:
             action = form_action.group(1)
-            self._flow.form_action_url = (
-                action
-                if action.startswith("http")
-                else f"https://private.e-distribuzione.it{action}"
+            self._flow.form_action_url = _url_via_host_diretto(
+                action if action.startswith("http") else f"{SF_ORIGIN}{action}"
             )
