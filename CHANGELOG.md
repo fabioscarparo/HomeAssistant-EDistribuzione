@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+### Added
+- Sign-in from the browser, recommended when E-Distribuzione blocks the automated one.
+- A fix in Settings > Repairs to sign in again when access is blocked.
+- Diagnostics and debug logs for bug reports.
+
 ## 0.7.0
 ### Added
 - Current time band sensor.
