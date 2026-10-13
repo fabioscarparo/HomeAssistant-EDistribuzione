@@ -109,3 +109,32 @@ async def test_il_ciclo_automatico_restituisce_il_riepilogo(hass, make_edist_coo
     ):
         dati = await coordinator._async_update_data()
     assert dati == {"by_pod": {POD_A: {"x": 1}}}
+
+
+async def test_all_avvio_ricostruisce_ogni_pod_e_direzione(hass, make_edist_coordinator):
+    coordinator = make_edist_coordinator(pods=[POD_A, "IT001E10000002"])
+    hass.config.components.add("recorder")
+    with patch(
+        "custom_components.edistribuzione.coordinator.async_ricostruisci_serie_mancanti",
+        AsyncMock(side_effect=[OSError("disco"), [], [], []]),
+    ) as ricostruisci:
+        # A failure on one series must not stop the others, nor the setup.
+        await coordinator.async_ricostruisci_serie_mancanti()
+    assert [(c.args[1], c.kwargs["immessa"]) for c in ricostruisci.await_args_list] == [
+        (POD_A, False),
+        (POD_A, True),
+        ("IT001E10000002", False),
+        ("IT001E10000002", True),
+    ]
+    # The same label as the daily import, which follows the POD role.
+    assert ricostruisci.await_args_list[1].kwargs["nome"] == coordinator._nome_serie(POD_A, True)
+
+
+async def test_senza_recorder_non_ricostruisce(hass, make_edist_coordinator):
+    coordinator = make_edist_coordinator()
+    with patch(
+        "custom_components.edistribuzione.coordinator.async_ricostruisci_serie_mancanti",
+        AsyncMock(),
+    ) as ricostruisci:
+        await coordinator.async_ricostruisci_serie_mancanti()
+    ricostruisci.assert_not_awaited()

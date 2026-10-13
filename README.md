@@ -376,8 +376,10 @@ The three series share the hourly timestamps of the total series of their
 direction, and hour by hour F1 + F2 + F3 = total. Like the total, they are
 recalculated from `edistribuzione_curve.db`: on the first import after
 updating the integration they already cover all the history downloaded so
-far, and they follow corrections on their own. The injection bands appear
-from version 0.8.1, with the first daily update or history fetch.
+far, and they follow corrections on their own. Series missing from Home
+Assistant, like the injection bands after updating to 0.8.1 or later, are
+rebuilt from that database at every restart, with no request to
+E-Distribuzione.
 
 ### Time zone and holidays
 

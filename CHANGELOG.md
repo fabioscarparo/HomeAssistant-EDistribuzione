@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.2
+### Fixed
+- After an update the injection by time band appears at the first restart, built from the data
+  already downloaded, instead of waiting for the next daily import.
+
 ## 0.8.1
 ### Added
 - Injection by F1/F2/F3 time band, in the statistics and in the POD card

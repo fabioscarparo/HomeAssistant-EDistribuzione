@@ -262,8 +262,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # until the next reload.
     ir.async_delete_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
     ir.async_delete_issue(hass, DOMAIN, ISSUE_APP_BLOCCATA)
-    # Read before contacting E-Distribuzione: the diagnostic sensors show the
-    # data already imported even if the first refresh fails.
+    # Before contacting E-Distribuzione: series added by an update (or lost by
+    # the Recorder) are rebuilt from the local database, and the diagnostic
+    # sensors show the data already imported, even if the first refresh fails.
+    await coordinator.async_ricostruisci_serie_mancanti()
     await coordinator.async_aggiorna_riepilogo()
     # async_config_entry_first_refresh RAISES ConfigEntryNotReady if the first
     # refresh fails, and HA retries the setup later. It must run BEFORE

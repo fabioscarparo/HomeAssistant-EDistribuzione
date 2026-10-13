@@ -281,3 +281,16 @@ async def test_rimuovendo_l_integrazione_sparisce_anche_l_avviso(hass):
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is None
+
+
+async def test_all_avvio_ricostruisce_le_serie_anche_con_l_accesso_bloccato(hass):
+    """The rebuild comes from the local database: it runs before the first
+    refresh, so the new series appear even while E-Distribuzione is blocked."""
+    with patch(
+        "custom_components.edistribuzione.coordinator.EdistribuzioneCoordinator"
+        ".async_ricostruisci_serie_mancanti",
+        AsyncMock(),
+    ) as ricostruisci:
+        entry, _ = await _setup_con_rinnovo(hass, AccessoBloccato("antibot"))
+    assert entry.state is ConfigEntryState.LOADED
+    ricostruisci.assert_awaited_once()

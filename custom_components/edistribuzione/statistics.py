@@ -227,14 +227,29 @@ async def async_import_curva_giornaliera(
     tutti_campioni = await hass.async_add_executor_job(
         raw_storage.leggi_campioni, db_path, pod, direzione
     )
-    ore = _aggrega_ore(tutti_campioni)
-
-    if not ore:
+    if not tutti_campioni:
         # Should not happen (we just upserted samples), but never trust a
         # non-empty list that becomes empty elsewhere.
         _LOGGER.warning("POD %s (immessa=%s): raw_storage vuoto dopo l'upsert", pod, immessa)
         return None
+    return _scrivi_serie(hass, pod, tutti_campioni, immessa=immessa, nome=nome)
 
+
+def _scrivi_serie(
+    hass: HomeAssistant,
+    pod: str,
+    tutti_campioni: list[tuple[datetime, float]],
+    *,
+    immessa: bool,
+    nome: str | None,
+) -> date:
+    """Write the total series of one direction and, if it has them, its band
+    series, recomputed from ALL its samples in raw_storage.
+
+    Returns the local date of the last point of the total series.
+    """
+    direzione = MAGNITUDE_IMMESSA if immessa else MAGNITUDE_PRELEVATA
+    ore = _aggrega_ore(tutti_campioni)
     statistic_id = _sanitize_statistic_id(pod, immessa=immessa)
     nome_serie = nome or f"E-Distribuzione {pod}{' (immessa)' if immessa else ''}"
     stats = _serie_cumulativa(ore)
@@ -264,6 +279,44 @@ async def async_import_curva_giornaliera(
         ultima_data.isoformat(),
     )
     return ultima_data
+
+
+async def async_ricostruisci_serie_mancanti(
+    hass: HomeAssistant, pod: str, *, immessa: bool, nome: str | None = None
+) -> list[str]:
+    """Rebuild from raw_storage the series of one direction missing from the
+    Recorder, with no request to E-Distribuzione. Returns the ids rebuilt.
+
+    Called at every start: a version that adds series (the injection bands of
+    0.8.1) has them right away, built from all the history already downloaded,
+    instead of waiting for the next import - which comes once a day, and not at
+    all while E-Distribuzione blocks the access. It also covers a Recorder that
+    lost its data. When every series is there it only reads the Recorder.
+    """
+    direzione = MAGNITUDE_IMMESSA if immessa else MAGNITUDE_PRELEVATA
+    ids = [_sanitize_statistic_id(pod, immessa=immessa)]
+    if direzione in DIREZIONI_CON_FASCE:
+        ids += list(statistic_ids_fasce(pod, immessa=immessa).values())
+    mancanti = [sid for sid in ids if await _ultima_data_serie(hass, sid) is None]
+    if not mancanti:
+        return []
+
+    db_path = raw_storage.percorso_predefinito(hass)
+    campioni = await hass.async_add_executor_job(
+        raw_storage.leggi_campioni, db_path, pod, direzione
+    )
+    if not campioni:
+        # Nothing downloaded yet for this direction (or never measured): the
+        # first import will create the series.
+        return []
+    _LOGGER.info(
+        "POD %s: ricostruisco dal database locale le serie mancanti %s (%d campioni)",
+        pod,
+        ", ".join(mancanti),
+        len(campioni),
+    )
+    _scrivi_serie(hass, pod, campioni, immessa=immessa, nome=nome)
+    return mancanti
 
 
 async def _ultima_data_serie(hass: HomeAssistant, statistic_id: str) -> date | None:

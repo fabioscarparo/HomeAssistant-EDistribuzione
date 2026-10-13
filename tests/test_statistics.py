@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from functools import partial
+from unittest.mock import patch
 
 import pytest
 from homeassistant.components.recorder import get_instance
@@ -22,6 +23,7 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
 
 from custom_components.edistribuzione import raw_storage as rs
 from custom_components.edistribuzione import statistics as st
+from custom_components.edistribuzione.const import MAGNITUDE_PRELEVATA
 
 
 def _giorno(
@@ -404,3 +406,41 @@ async def test_rettifica_si_propaga_anche_alle_fasce(recorder_mock, hass):
     ora_10 = _ora("2026-08-03T08:00:00+00:00")
     assert f1[ora_10]["state"] == pytest.approx(0.3)
     assert f1[ora_10]["sum"] == pytest.approx(0.3)
+
+
+# --- Rebuild at start-up from the local database ------------------------------
+
+
+async def test_dopo_l_aggiornamento_le_fasce_dell_immissione_compaiono_all_avvio(
+    recorder_mock, hass, tmp_path
+):
+    """The real upgrade to 0.8.1: injection imported by an earlier version,
+    with its total series and no band series. At the next start the bands are
+    rebuilt from the local database, for all the history, with no request to
+    E-Distribuzione."""
+    pod = "IT001E00000030"
+    giorno = _giorno(*LUNEDI, [0.25] * 96, energy_type="A2")
+    with patch.object(rs, "percorso_predefinito", return_value=str(tmp_path / "curve.db")):
+        with patch.object(st, "DIREZIONI_CON_FASCE", (MAGNITUDE_PRELEVATA,)):
+            await st.async_import_curva_giornaliera(hass, pod, [giorno], immessa=True)
+        await async_recorder_block_till_done(hass)
+
+        ricostruite = await st.async_ricostruisci_serie_mancanti(
+            hass, pod, immessa=True, nome="E-Distribuzione X - immissione"
+        )
+        await async_recorder_block_till_done(hass)
+
+        assert ricostruite == list(st.statistic_ids_fasce(pod, immessa=True).values())
+        f1 = await _leggi_statistiche(hass, st.statistic_ids_fasce(pod, immessa=True)["f1"])
+        assert f1[max(f1)]["sum"] == pytest.approx(11.0)
+
+        # Next start: every series is there, nothing is rewritten.
+        assert await st.async_ricostruisci_serie_mancanti(hass, pod, immessa=True) == []
+
+
+async def test_senza_dati_locali_non_ricostruisce_niente(recorder_mock, hass, tmp_path):
+    pod = "IT001E00000031"
+    with patch.object(rs, "percorso_predefinito", return_value=str(tmp_path / "curve.db")):
+        assert await st.async_ricostruisci_serie_mancanti(hass, pod, immessa=True) == []
+    await async_recorder_block_till_done(hass)
+    assert not await _leggi_statistiche(hass, st._sanitize_statistic_id(pod, immessa=True))

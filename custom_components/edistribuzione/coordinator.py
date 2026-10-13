@@ -65,7 +65,11 @@ from .const import (
     TIPO_POD_PRODUZIONE,
 )
 from .fasce import FUSO_ITALIA
-from .statistics import async_get_ultima_data_disponibile, async_import_curva_giornaliera
+from .statistics import (
+    async_get_ultima_data_disponibile,
+    async_import_curva_giornaliera,
+    async_ricostruisci_serie_mancanti,
+)
 from .testi import testo
 
 _LOGGER = logging.getLogger(__name__)
@@ -346,6 +350,24 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         self._accesso_riuscito()
         _LOGGER.debug("POD %s: %s, %d giorni nella risposta", pod, magnitude, len(curva))
         return curva
+
+    async def async_ricostruisci_serie_mancanti(self) -> None:
+        """Rebuild from the local database the statistics missing from the
+        Recorder, for every POD and direction (see
+        statistics.async_ricostruisci_serie_mancanti). No request to
+        E-Distribuzione: it works while the access is blocked too."""
+        if "recorder" not in self.hass.config.components:
+            return
+        for pod in self.pods:
+            for immessa in (False, True):
+                try:
+                    await async_ricostruisci_serie_mancanti(
+                        self.hass, pod, immessa=immessa, nome=self._nome_serie(pod, immessa)
+                    )
+                except Exception:  # noqa: BLE001 - a repair, it must never block the setup
+                    _LOGGER.exception(
+                        "POD %s: ricostruzione delle serie dal database locale fallita", pod
+                    )
 
     # ------------------------------------------------------------------
     # Diagnostic sensors
