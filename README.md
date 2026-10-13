@@ -85,10 +85,35 @@ kept.
 
 ### 1. Add the integration
 
-1. Go to **Settings → Devices & services → Add integration** and search for
-   **E-Distribuzione**. If it does not appear, reload the page.
-2. Enter the email and password of your customer area.
-3. Enter the OTP code you receive by email or SMS.
+Go to **Settings → Devices & services → Add integration** and search for
+**E-Distribuzione**. If it does not appear, reload the page. Then choose how
+to sign in:
+
+- **Continue in browser (recommended)**: you sign in on E-Distribuzione's
+  official website, which the block on automated access does not stop, and
+  your password does not go through Home Assistant.
+- **Use password and OTP**: Home Assistant signs in for you, with the email
+  and password of your customer area and the OTP code you receive by email or
+  SMS. E-Distribuzione can block it with its anti-bot check: the setup then
+  offers the browser.
+
+#### Sign in from the browser
+
+1. On a computer, open the link shown in the setup and sign in with the
+   account of your PODs. If the browser is already signed in to the portal
+   with another account, sign out first. Do not use a phone with the
+   E-Distribuzione app: the app would open the final address.
+2. After signing in the page stays blank or shows an error: that is
+   expected, the final address is meant for the app.
+3. Copy that address, which starts with `eneldist://redirect`. In Chrome and
+   Edge open the developer tools (**F12**, or **⌥⌘J** on a Mac) and copy
+   from the **Console** tab the red line that contains it; in other browsers
+   it may show in the address bar. You can paste the whole line.
+4. Paste it into the setup and submit.
+
+The link only works for the setup that showed it.
+
+#### Sign in with password and OTP
 
 > [!NOTE]
 > Only use the code that arrives after submitting your credentials here.
@@ -108,23 +133,29 @@ and says whether your credentials are the problem:
 | Message | What to do |
 |---|---|
 | **E-Distribuzione rejected the email or password** | Use the credentials of the E-Distribuzione customer area, the grid operator, not those of your energy supplier (for example Enel Energia): they are two different accounts. |
-| **Generic technical error** | Not a credentials problem: the portal did not check them. Try again later; if the website shows the same error, contact E-Distribuzione. |
+| **Generic technical error** | Not a credentials problem: the portal did not check them. Sign in from the browser, or try again later. |
 | **Account locked or disabled**, **password expired** | Fix it on the official website, then sign in here again. |
-| **Blocking automated access** (anti-bot check) | Not a credentials problem. Try again later, without insisting. |
+| **Blocking automated access** (anti-bot check) | Not a credentials problem: sign in from the browser. |
 | **Rejecting the official app's client** (`app_blocked`) | E-Distribuzione is refusing the client the integration signs in with. Not a credentials problem: try again later. |
+| **No address starting with eneldist://redirect** | Copy the address shown after signing in, not the link of the setup. |
+| **The address belongs to another sign-in link** | Open the link of the current setup, sign in and paste the new address. |
+| **The address is missing some data** | It was only partly copied: copy all of it, to the end of the line. |
+| **Another E-Distribuzione account** (when signing in again) | The browser was signed in with another account: sign out of the portal and try again. |
 | **Unexpected answer** | The portal may be under maintenance or may have changed. If it keeps happening, open an issue with the log. |
 | **Cannot reach E-Distribuzione** | Check Home Assistant's internet connection and DNS. |
 
-Installations already set up show the two blocks in **Settings → Repairs**
-and resume on their own, retrying once an hour, as soon as access works
-again. **Do not remove the integration to set it up again while a block
-lasts**: the new sign-in is refused too. If access expires instead (for
-example after a password change), Home Assistant asks you to sign in again
-from **Settings → Devices & services**, keeping PODs, options and history.
+Installations already set up keep using the access they have. When
+E-Distribuzione blocks its renewal, a notice in **Settings → Repairs** lets
+you sign in again from the browser and resume at once; otherwise the
+integration retries once an hour. **Do not remove the integration to set it
+up again**: signing in again keeps PODs, options and history. If access
+expires (for example after a password change), Home Assistant asks you to
+sign in again from **Settings → Devices & services**.
 
 Other problems, or ideas? Please report them in the
 [issues](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues),
-quoting the message shown.
+quoting the message shown and attaching the
+[diagnostics and debug log](#reporting-a-problem).
 
 ### 2. Select the PODs
 
@@ -450,6 +481,20 @@ Home Assistant theme tokens (energy colors, typography, radii, tile icon,
 control select, chart theme), so it follows light/dark mode and custom
 themes, as well as the language, number format, time format and first day
 of the week set in the user profile.
+
+## Reporting a problem
+
+Two files help the most, and neither contains passwords, OTP codes or
+tokens:
+
+- **Diagnostics**: **Settings → Devices & services → E-Distribuzione → ⋮ →
+  Download diagnostics**. Versions, access state, last error and import
+  state, with the POD codes replaced by `POD_1`, `POD_2`...
+- **Debug log**: **Settings → Devices & services → E-Distribuzione → ⋮ →
+  Enable debug logging**, repeat what fails, then **Disable debug logging**:
+  Home Assistant downloads the log. It shows each step of the sign-in, of
+  the access renewal and of the data requests. Log messages are in Italian;
+  POD codes appear in them, so mask them if you prefer.
 
 ## Languages
 

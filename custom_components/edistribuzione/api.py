@@ -78,6 +78,7 @@ class ApiClient:
         async with self._session.get(
             url, headers=self._headers(method_user), params=params
         ) as resp:
+            _LOGGER.debug("GET %s (%s) %s: HTTP %s", url, method_user, params, resp.status)
             if resp.status == 401:
                 raise ApiError("401 Unauthorized - access_token scaduto", status=401)
             if resp.status == 404:
@@ -130,9 +131,11 @@ class ApiClient:
             resp.raise_for_status()
             payload = await resp.json(content_type=None)
         try:
-            return payload["data"][0]["pods"]
+            pods = payload["data"][0]["pods"]
         except (KeyError, IndexError):
-            return []
+            pods = []
+        _LOGGER.debug("getSupplies: %d POD sull'account", len(pods))
+        return pods
 
     async def async_get_reading(self, pod: str, date_from: date, date_to: date) -> list[dict[str, Any]]:
         """Official cumulative monthly readings (EA/ER per band + POT peaks)."""

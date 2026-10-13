@@ -41,8 +41,10 @@ from .api import ApiClient, ApiError
 from .auth import AccessoBloccato, AppBloccata, AuthClient, AuthError, TokenNonValido
 from .const import (
     ABBANDONO_CODA_DOPO_GIORNI,
+    CONF_ACCESS_TOKEN,
     CONF_DATA_INSTALLAZIONE,
     CONF_GIORNI_DA_RIPROVARE,
+    CONF_INSTANCE_URL,
     CONF_ORA_RICHIESTA,
     CONF_PODS,
     CONF_REFRESH_TOKEN,
@@ -173,6 +175,10 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         # check or by rejecting the OAuth client (see _async_ensure_token and
         # async_setup_entry).
         self.accesso_bloccato = False
+        # Last access problem and last successful refresh, for the
+        # diagnostics (see diagnostics.py): what a bug report needs first.
+        self.ultimo_errore_accesso: str | None = None
+        self.ultimo_rinnovo: str | None = None
         # What the diagnostic sensors show, per POD (see async_aggiorna_riepilogo).
         self.riepilogo: dict[str, dict] = {}
         session = async_get_clientsession(hass)
@@ -211,67 +217,135 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         describe two different blocks.
         """
         self.accesso_bloccato = True
+        _LOGGER.warning("Accesso a E-Distribuzione bloccato: avviso %s in Riparazioni", issue)
         for altro in (ISSUE_ACCESSO_BLOCCATO, ISSUE_APP_BLOCCATA):
             if altro != issue:
                 ir.async_delete_issue(self.hass, DOMAIN, altro)
+        # Fixable: the fix starts the reauth, where a login in the browser
+        # gives a working access token again (see repairs.py).
         ir.async_create_issue(
             self.hass,
             DOMAIN,
             issue,
-            is_fixable=False,
+            is_fixable=True,
             severity=ir.IssueSeverity.WARNING,
             translation_key=issue,
         )
 
-    async def _async_ensure_token(self) -> None:
+    def _registra_errore_accesso(self, err: Exception) -> None:
+        self.ultimo_errore_accesso = f"{dt_util.now().isoformat()} {type(err).__name__}: {err}"
+
+    def _accesso_riuscito(self) -> None:
+        """E-Distribuzione accepted a refresh or a data request: the notices,
+        if any, are no longer needed."""
+        if self.accesso_bloccato:
+            _LOGGER.info("Accesso a E-Distribuzione di nuovo disponibile")
+        self.accesso_bloccato = False
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_APP_BLOCCATA)
+
+    async def _async_ensure_token(self, *, force_refresh: bool = False) -> None:
+        """Configure the API with a usable token.
+
+        Browser OAuth has already issued a valid access token.  Reusing it
+        avoids an unnecessary refresh request from the Home Assistant
+        container, the exact request currently rejected by E-Distribuzione.
+        A refresh is attempted only after the data API reports that the cached
+        token is no longer accepted.
+
+        Reusing the saved token says nothing about whether access works, so it
+        leaves the Repairs notices as they are: they go away after a refresh
+        or a data request that succeeds (see _accesso_riuscito).
+        """
+        access_token = self.entry.data.get(CONF_ACCESS_TOKEN)
+        if access_token and not force_refresh:
+            _LOGGER.debug("Uso l'access token salvato, senza rinnovarlo")
+            self._api.update_token(access_token)
+            return
+
+        _LOGGER.debug(
+            "Rinnovo dell'accesso%s",
+            " dopo un token rifiutato dal servizio dati" if force_refresh else "",
+        )
         refresh_token = self.entry.data[CONF_REFRESH_TOKEN]
         try:
             tokens = await self._auth.async_refresh_access_token(refresh_token)
-        except AccessoBloccato as err:
-            self._segnala_blocco(ISSUE_ACCESSO_BLOCCATO)
-            raise UpdateFailed(
-                translation_domain=DOMAIN, translation_key="accesso_bloccato"
-            ) from err
-        except AppBloccata as err:
-            # Not a reauth: the login goes through the same OAuth client and is
-            # refused too, while the saved refresh_token works again as soon as
-            # E-Distribuzione lifts the block.
-            _LOGGER.warning("Rinnovo dell'accesso rifiutato: %s", err)
-            self._segnala_blocco(ISSUE_APP_BLOCCATA)
-            raise UpdateFailed(
-                translation_domain=DOMAIN, translation_key="app_bloccata"
-            ) from err
-        except TokenNonValido as err:
-            # The refresh_token was revoked or has expired (password change,
-            # sessions closed on Enel's side, ...): Home Assistant shows the
-            # reauth, which keeps PODs, options and history.
-            _LOGGER.warning("Accesso a E-Distribuzione scaduto: %s", err)
-            raise ConfigEntryAuthFailed(
-                translation_domain=DOMAIN, translation_key="accesso_scaduto"
-            ) from err
         except AuthError as err:
-            raise UpdateFailed(
-                translation_domain=DOMAIN,
-                translation_key="refresh_token_fallito",
-                translation_placeholders={"errore": str(err)},
-            ) from err
+            self._registra_errore_accesso(err)
+            raise self._errore_rinnovo(err) from err
         except (aiohttp.ClientError, TimeoutError) as err:
+            self._registra_errore_accesso(err)
             raise UpdateFailed(
                 translation_domain=DOMAIN,
                 translation_key="portale_non_raggiungibile",
                 translation_placeholders={"errore": type(err).__name__},
             ) from err
 
-        # Access possible again: the notices, if any, are no longer needed.
-        self.accesso_bloccato = False
-        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
-        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_APP_BLOCCATA)
+        _LOGGER.info("Accesso a E-Distribuzione rinnovato via %s", self._auth.host_attivo)
+        self.ultimo_rinnovo = dt_util.now().isoformat()
+        self._accesso_riuscito()
         self._api.update_token(tokens.access_token)
 
-        if tokens.refresh_token != refresh_token:
-            new_data = dict(self.entry.data)
-            new_data[CONF_REFRESH_TOKEN] = tokens.refresh_token
+        new_data = {
+            **self.entry.data,
+            CONF_ACCESS_TOKEN: tokens.access_token,
+            CONF_REFRESH_TOKEN: tokens.refresh_token,
+            CONF_INSTANCE_URL: getattr(tokens, "instance_url", ""),
+        }
+        if new_data != self.entry.data:
             self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+
+    def _errore_rinnovo(self, err: AuthError) -> HomeAssistantError:
+        """The error Home Assistant shows for a refused refresh, after raising
+        the Repairs notice it needs."""
+        if isinstance(err, AccessoBloccato):
+            self._segnala_blocco(ISSUE_ACCESSO_BLOCCATO)
+            return UpdateFailed(translation_domain=DOMAIN, translation_key="accesso_bloccato")
+        if isinstance(err, AppBloccata):
+            # Not a reauth on its own: the saved refresh_token works again as
+            # soon as E-Distribuzione lifts the block. The notice offers a new
+            # login in the browser meanwhile.
+            _LOGGER.warning("Rinnovo dell'accesso rifiutato: %s", err)
+            self._segnala_blocco(ISSUE_APP_BLOCCATA)
+            return UpdateFailed(translation_domain=DOMAIN, translation_key="app_bloccata")
+        if isinstance(err, TokenNonValido):
+            # The refresh_token was revoked or has expired (password change,
+            # sessions closed on Enel's side, ...): Home Assistant shows the
+            # reauth, which keeps PODs, options and history.
+            _LOGGER.warning("Accesso a E-Distribuzione scaduto: %s", err)
+            return ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="accesso_scaduto"
+            )
+        _LOGGER.warning("Rinnovo dell'accesso fallito: %s", err)
+        return UpdateFailed(
+            translation_domain=DOMAIN,
+            translation_key="refresh_token_fallito",
+            translation_placeholders={"errore": str(err)},
+        )
+
+    async def _async_get_daily_load_profile(
+        self, pod: str, data_da: date, data_a: date, magnitude: str
+    ) -> list[dict]:
+        """Read a curve, refreshing the token once if the data service rejects
+        it (401, or 403 on some gateways) and asking again."""
+        _LOGGER.debug("POD %s: richiedo %s dal %s al %s", pod, magnitude, data_da, data_a)
+        try:
+            curva = await self._api.async_get_daily_load_profile(
+                pod, data_da, data_a, magnitude=magnitude
+            )
+        except ApiError as err:
+            if err.status not in (401, 403):
+                raise
+            _LOGGER.info(
+                "Il servizio dati ha rifiutato l'access token (HTTP %s): lo rinnovo", err.status
+            )
+            await self._async_ensure_token(force_refresh=True)
+            curva = await self._api.async_get_daily_load_profile(
+                pod, data_da, data_a, magnitude=magnitude
+            )
+        self._accesso_riuscito()
+        _LOGGER.debug("POD %s: %s, %d giorni nella risposta", pod, magnitude, len(curva))
+        return curva
 
     # ------------------------------------------------------------------
     # Diagnostic sensors
@@ -528,7 +602,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         """
         risultati: dict[str, dict] = {}
         for magnitude in MAGNITUDE_TUTTE:
-            curva = await self._api.async_get_daily_load_profile(
+            curva = await self._async_get_daily_load_profile(
                 pod, data_da, data_a, magnitude=magnitude
             )
             if not _curva_ha_dati(curva):
@@ -662,6 +736,11 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         for pod_corrente in pod_da_recuperare:
             try:
                 risultati = await self._async_importa_periodo(pod_corrente, data_da, data_a)
+            except ConfigEntryAuthFailed:
+                # The saved token was rejected and the refresh said the access
+                # has expired: same as above.
+                self.entry.async_start_reauth(self.hass)
+                raise
             except ApiError as err:
                 _LOGGER.warning(
                     "POD %s: errore recuperando il periodo %s - %s: %s",

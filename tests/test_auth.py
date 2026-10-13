@@ -71,6 +71,139 @@ class TestEstraiFwuid:
             auth.AuthClient._estrai_fwuid("<html>niente qui</html>")
 
 
+class TestOAuthBrowser:
+    def _client(self):
+        return auth.AuthClient(session=None)
+
+    def test_url_browser_usa_user_agent_flow_con_state(self):
+        from urllib.parse import parse_qs, urlparse
+
+        client = self._client()
+        url = client.prepare_browser_token_authorization_url()
+        params = parse_qs(urlparse(url).query)
+
+        assert params["response_type"] == ["token"]
+        assert params["state"] == [client._oauth_state]
+        assert params["redirect_uri"] == [auth.OAUTH_REDIRECT_URI]
+
+    def test_redirect_browser_estrae_token_e_istanza(self):
+        from urllib.parse import urlencode
+
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = (
+            f"{auth.OAUTH_REDIRECT_URI}#"
+            + urlencode({
+                "access_token": "access",
+                "refresh_token": "refresh",
+                "instance_url": "https://example.my.salesforce.com",
+                "state": client._oauth_state,
+            })
+        )
+
+        tokens = client.tokens_from_browser_redirect(redirect)
+
+        assert tokens.access_token == "access"
+        assert tokens.refresh_token == "refresh"
+        assert tokens.instance_url == "https://example.my.salesforce.com"
+
+    def _redirect(self, client, **parametri) -> str:
+        from urllib.parse import urlencode
+
+        return f"{auth.OAUTH_REDIRECT_URI}#" + urlencode(
+            {"state": client._oauth_state, **parametri}, safe="!"
+        )
+
+    def test_redirect_di_un_altro_link_e_rifiutato(self):
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = self._redirect(client, state="other", access_token="a", refresh_token="r")
+
+        with pytest.raises(auth.InvalidBrowserRedirect) as errore:
+            client.tokens_from_browser_redirect(redirect)
+        assert errore.value.motivo == "altro_tentativo"
+
+    def test_ogni_link_ha_uno_state_nuovo(self):
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        vecchio = self._redirect(client, access_token="a", refresh_token="r")
+        client.prepare_browser_token_authorization_url()
+        with pytest.raises(auth.InvalidBrowserRedirect):
+            client.tokens_from_browser_redirect(vecchio)
+
+    def test_accetta_la_riga_intera_della_console_di_chrome(self):
+        """What the user copies from Chrome's console, quotes included."""
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = self._redirect(client, access_token="00D!AQ", refresh_token="5Aep")
+        riga = (
+            f"Failed to launch '{redirect}' because the scheme does not have a "
+            "registered handler."
+        )
+        tokens = client.tokens_from_browser_redirect(riga)
+        assert (tokens.access_token, tokens.refresh_token) == ("00D!AQ", "5Aep")
+
+    def test_il_piu_nei_token_non_diventa_uno_spazio(self):
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = (
+            f"{auth.OAUTH_REDIRECT_URI}#access_token=00D!AQ+abc&refresh_token=5Aep+xyz"
+            f"&state={client._oauth_state}"
+        )
+        tokens = client.tokens_from_browser_redirect(redirect)
+        assert (tokens.access_token, tokens.refresh_token) == ("00D!AQ+abc", "5Aep+xyz")
+
+    def test_senza_indirizzo_dell_app(self):
+        client = self._client()
+        url = client.prepare_browser_token_authorization_url()
+        with pytest.raises(auth.InvalidBrowserRedirect) as errore:
+            # The sign-in link itself, pasted back by mistake.
+            client.tokens_from_browser_redirect(url)
+        assert errore.value.motivo == "mancante"
+
+    def test_rifiuto_del_portale_con_la_sua_descrizione(self):
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = (
+            f"{auth.OAUTH_REDIRECT_URI}#error=access_denied"
+            f"&error_description=end-user+denied+authorization&state={client._oauth_state}"
+        )
+        with pytest.raises(auth.InvalidBrowserRedirect) as errore:
+            client.tokens_from_browser_redirect(redirect)
+        assert errore.value.motivo == "negato"
+        assert errore.value.dettaglio == "end-user denied authorization"
+
+    def test_app_blocked_nel_redirect(self):
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = self._redirect(client, error="app_blocked")
+        with pytest.raises(auth.AppBloccata):
+            client.tokens_from_browser_redirect(redirect)
+
+    def test_senza_refresh_token(self):
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = self._redirect(client, access_token="a")
+        with pytest.raises(auth.InvalidBrowserRedirect) as errore:
+            client.tokens_from_browser_redirect(redirect)
+        assert errore.value.motivo == "token_mancanti"
+        assert errore.value.dettaglio == "refresh_token"
+
+    def test_nei_log_non_finiscono_i_token(self, caplog):
+        """Debug logs are meant to be attached to public issues."""
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = self._redirect(
+            client, access_token="SEGRETO-ACCESSO", refresh_token="SEGRETO-RINNOVO"
+        )
+        with caplog.at_level("DEBUG"):
+            client.tokens_from_browser_redirect(redirect)
+            with pytest.raises(auth.InvalidBrowserRedirect):
+                client.tokens_from_browser_redirect(redirect.replace("state=", "state=x"))
+        assert "SEGRETO" not in caplog.text
+        assert "access_token" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # _estrai_loaded
 # ---------------------------------------------------------------------------
@@ -649,6 +782,17 @@ class TestRifiutoLogin:
         )
         with pytest.raises(auth.ParsingError, match="internal server error"):
             await _invia_credenziali_con_risposta(body)
+
+    async def test_l_indirizzo_di_sessione_non_finisce_nei_log(self, caplog):
+        """After "OK:" comes the frontdoor address, with the session id."""
+        body = (
+            '{"actions":[{"state":"SUCCESS","returnValue":'
+            '"OK:https://private.e-distribuzione.it/secur/frontdoor.jsp?sid=SEGRETO"}]}'
+        )
+        with caplog.at_level("DEBUG"):
+            await _invia_credenziali_con_risposta(body)
+        assert "SEGRETO" not in caplog.text
+        assert "esito OK:" in caplog.text
 
     async def test_ok_restituisce_l_indirizzo_da_seguire(self):
         body = '{"actions":[{"state":"SUCCESS","returnValue":"OK:https://private.e-distribuzione.it/fd"}]}'

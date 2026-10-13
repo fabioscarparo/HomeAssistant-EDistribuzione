@@ -24,7 +24,7 @@ from homeassistant.exceptions import (
 
 from custom_components.edistribuzione.api import ApiError
 from custom_components.edistribuzione.auth import TokenNonValido
-from custom_components.edistribuzione.const import DOMAIN, MAGNITUDE_PRELEVATA
+from custom_components.edistribuzione.const import CONF_ACCESS_TOKEN, DOMAIN, MAGNITUDE_PRELEVATA
 
 from .conftest import POD_A, POD_B
 
@@ -286,3 +286,22 @@ async def test_dopo_l_import_i_sensori_si_aggiornano_subito(
         await coordinator.async_recupera_storico(DATA_DA, DATA_A)
     riepilogo.assert_awaited_once()
     ascoltatore.assert_called()
+
+
+async def test_accesso_scaduto_durante_l_import_apre_la_riautenticazione(
+    hass, make_edist_coordinator
+):
+    """The saved token is rejected during the fetch and the refresh says the
+    access has expired: the reauth must start here too."""
+    coordinator = make_edist_coordinator(pods=[POD_A], data={CONF_ACCESS_TOKEN: "salvato"})
+    coordinator._api.async_get_daily_load_profile = AsyncMock(
+        side_effect=ApiError("401", status=401)
+    )
+    coordinator._auth.async_refresh_access_token = AsyncMock(
+        side_effect=TokenNonValido("invalid_grant")
+    )
+    with freeze_time(OGGI), pytest.raises(ConfigEntryAuthFailed):
+        await coordinator.async_recupera_storico(DATA_DA, DATA_A)
+    await hass.async_block_till_done()
+    flussi = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [f["context"]["source"] for f in flussi] == ["reauth"]

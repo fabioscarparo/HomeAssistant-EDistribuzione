@@ -4,6 +4,7 @@ away on its own once access is back; expired, with a request to sign in
 again."""
 from __future__ import annotations
 
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -15,6 +16,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.edistribuzione.api import ApiError
 from custom_components.edistribuzione.auth import (
     AccessoBloccato,
     AppBloccata,
@@ -22,6 +24,8 @@ from custom_components.edistribuzione.auth import (
     TokenNonValido,
 )
 from custom_components.edistribuzione.const import (
+    CONF_ACCESS_TOKEN,
+    CONF_INSTANCE_URL,
     CONF_PODS,
     CONF_REFRESH_TOKEN,
     DOMAIN,
@@ -30,6 +34,94 @@ from custom_components.edistribuzione.const import (
 )
 
 from .conftest import POD_A
+
+
+async def test_access_token_browser_non_richiede_refresh(make_edist_coordinator):
+    coordinator = make_edist_coordinator(
+        data={
+            CONF_ACCESS_TOKEN: "access-browser",
+            CONF_INSTANCE_URL: "https://example.my.salesforce.com",
+        }
+    )
+    coordinator._auth.async_refresh_access_token = AsyncMock()
+    coordinator._api.update_token = Mock()
+
+    await coordinator._async_ensure_token()
+
+    coordinator._auth.async_refresh_access_token.assert_not_awaited()
+    coordinator._api.update_token.assert_called_once_with("access-browser")
+
+
+async def test_401_rinnova_token_e_riprova_la_richiesta(make_edist_coordinator):
+    coordinator = make_edist_coordinator(data={CONF_ACCESS_TOKEN: "access-scaduto"})
+    coordinator._api.async_get_daily_load_profile = AsyncMock(
+        side_effect=[ApiError("401", status=401), [{"sample": "lettura"}]]
+    )
+    coordinator._api.update_token = Mock()
+    coordinator._auth.async_refresh_access_token = AsyncMock(
+        return_value=SimpleNamespace(access_token="access-nuovo", refresh_token="rt")
+    )
+
+    risultato = await coordinator._async_get_daily_load_profile(
+        POD_A, date(2026, 10, 1), date(2026, 10, 1), "A1"
+    )
+
+    assert risultato == [{"sample": "lettura"}]
+    coordinator._auth.async_refresh_access_token.assert_awaited_once_with("rt")
+    coordinator._api.update_token.assert_called_once_with("access-nuovo")
+    assert coordinator._api.async_get_daily_load_profile.await_count == 2
+
+
+async def test_il_token_salvato_non_cancella_l_avviso_di_blocco(hass, make_edist_coordinator):
+    """Reusing the saved token says nothing about whether access works: the
+    notice must stay until a refresh or a data request succeeds."""
+    coordinator = make_edist_coordinator(data={CONF_ACCESS_TOKEN: "salvato"})
+    coordinator._segnala_blocco(ISSUE_ACCESSO_BLOCCATO)
+    await coordinator._async_ensure_token()
+    assert coordinator.accesso_bloccato
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is not None
+
+
+async def test_una_richiesta_dati_riuscita_toglie_l_avviso(hass, make_edist_coordinator):
+    coordinator = make_edist_coordinator(data={CONF_ACCESS_TOKEN: "salvato"})
+    coordinator._segnala_blocco(ISSUE_APP_BLOCCATA)
+    coordinator._api.async_get_daily_load_profile = AsyncMock(return_value=[])
+    await coordinator._async_get_daily_load_profile(POD_A, date(2026, 10, 1), date(2026, 10, 1), "A1")
+    assert not coordinator.accesso_bloccato
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA) is None
+
+
+async def test_anche_il_403_rinnova_il_token(make_edist_coordinator):
+    coordinator = make_edist_coordinator(data={CONF_ACCESS_TOKEN: "access-scaduto"})
+    coordinator._api.async_get_daily_load_profile = AsyncMock(
+        side_effect=[ApiError("403", status=403), []]
+    )
+    coordinator._auth.async_refresh_access_token = AsyncMock(
+        return_value=SimpleNamespace(access_token="nuovo", refresh_token="rt")
+    )
+    await coordinator._async_get_daily_load_profile(POD_A, date(2026, 10, 1), date(2026, 10, 1), "A1")
+    coordinator._auth.async_refresh_access_token.assert_awaited_once()
+    assert coordinator.entry.data[CONF_ACCESS_TOKEN] == "nuovo"
+
+
+async def test_token_salvato_scaduto_e_rinnovo_bloccato(hass, make_edist_coordinator):
+    """The case the browser login leaves behind once its access token expires
+    while E-Distribuzione still blocks the refresh: notice, data kept."""
+    coordinator = make_edist_coordinator(data={CONF_ACCESS_TOKEN: "scaduto"})
+    coordinator._api.async_get_daily_load_profile = AsyncMock(
+        side_effect=ApiError("401", status=401)
+    )
+    coordinator._auth.async_refresh_access_token = AsyncMock(
+        side_effect=AppBloccata("app_blocked")
+    )
+    with pytest.raises(UpdateFailed) as errore:
+        await coordinator._async_get_daily_load_profile(
+            POD_A, date(2026, 10, 1), date(2026, 10, 1), "A1"
+        )
+    assert errore.value.translation_key == "app_bloccata"
+    assert coordinator.accesso_bloccato
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA).is_fixable
+    assert coordinator.entry.data[CONF_ACCESS_TOKEN] == "scaduto"
 
 
 async def test_token_bloccato_avvisa_e_l_avviso_sparisce_quando_torna(
@@ -47,7 +139,9 @@ async def test_token_bloccato_avvisa_e_l_avviso_sparisce_quando_torna(
     avviso = registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO)
     assert avviso is not None
     assert avviso.translation_key == ISSUE_ACCESSO_BLOCCATO
-    assert not avviso.is_fixable
+    # Fixable: the fix starts a new sign-in (see repairs.py).
+    assert avviso.is_fixable
+    assert coordinator.ultimo_errore_accesso.endswith("AccessoBloccato: antibot")
 
     coordinator._auth.async_refresh_access_token = AsyncMock(
         return_value=SimpleNamespace(access_token="nuovo", refresh_token="rt")

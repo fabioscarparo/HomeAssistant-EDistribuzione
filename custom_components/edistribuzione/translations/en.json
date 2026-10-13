@@ -3,10 +3,36 @@
     "step": {
       "user": {
         "title": "Sign in to E-Distribuzione",
-        "description": "Use the same credentials as the official E-Distribuzione app or website. After signing in you will be asked for an OTP code, received by email or SMS: it will be sent by this setup, do not use codes generated on the website or in the app. If you have the app or the website open, log out there first: E-Distribuzione limits the number of concurrent sessions per account.{pod_correnti}",
+        "description": "Signing in from the browser is recommended: you sign in on E-Distribuzione's official website, which the block on automated access does not stop, and your password does not go through Home Assistant. Otherwise you can sign in with password and OTP code.{pod_correnti}",
+        "menu_options": {
+          "browser_login": "Continue in browser (recommended)",
+          "password_login": "Use password and OTP"
+        }
+      },
+      "password_login": {
+        "title": "Sign in with password and OTP",
+        "description": "Use the credentials from the official E-Distribuzione app or website. After signing in you will be asked for an OTP code sent by email or SMS. If you have the app or website open, log out there first: E-Distribuzione limits concurrent sessions.{pod_correnti}",
         "data": {
           "email": "Email",
           "password": "Password"
+        }
+      },
+      "antibot": {
+        "title": "Automated sign-in blocked",
+        "description": "E-Distribuzione blocked the automated login. You can complete sign-in in your browser or return to password sign-in and try again later.",
+        "menu_options": {
+          "browser_login": "Continue in browser",
+          "riprova_login": "Return to password sign-in"
+        }
+      },
+      "browser_login": {
+        "title": "Sign in from the browser",
+        "description": "Sign in to E-Distribuzione from your browser and paste here the address it ends on. Your password does not go through Home Assistant.{pod_correnti}\n\n1. On a computer, open [E-Distribuzione's sign-in page]({authorization_url}) and sign in with the account of your PODs. If the browser is already signed in to the portal with another account, sign out first. Do not use a phone with the E-Distribuzione app: the app would open the final address.\n2. After signing in the page stays blank or shows an error: that is expected, the final address is meant for the app.\n3. Copy that address, which starts with `eneldist://redirect`. In Chrome and Edge open the developer tools (F12, or ⌥⌘J on a Mac) and copy from the Console tab the red line that contains it; in other browsers it may show in the address bar. You can paste the whole line.\n4. Paste it below and submit. The link only works for this setup.",
+        "data": {
+          "redirect_url": "eneldist://redirect address"
+        },
+        "data_description": {
+          "redirect_url": "The address starting with eneldist://redirect, or the whole console line that contains it."
         }
       },
       "otp": {
@@ -40,7 +66,11 @@
       "app_bloccata": "E-Distribuzione is rejecting the official app's client the integration uses to sign in (\"app_blocked\" answer). It does not depend on your credentials and insisting now does not help: try again later.",
       "risposta_inattesa": "E-Distribuzione gave an unexpected answer during sign-in ({messaggio}). It does not depend on your credentials: the portal may be under maintenance or may have changed. Try again later; if it keeps happening, open an issue on GitHub with the log attached.",
       "errore_imprevisto": "Unexpected error during sign-in ({messaggio}). The details are in the Home Assistant log: try again, and if it happens again open an issue on GitHub with the log attached.",
-      "otp_formato": "The OTP code is made of digits only: check that you copied all of it, with no letters."
+      "otp_formato": "The OTP code is made of digits only: check that you copied all of it, with no letters.",
+      "browser_url_mancante": "The pasted text contains no address starting with eneldist://redirect. Copy the one shown after signing in, not the link on this page.",
+      "browser_negato": "E-Distribuzione refused the authorization (\"{messaggio}\"). Open the link again and complete the sign-in; if it happens again, try later.",
+      "browser_altro_link": "The pasted address belongs to another sign-in link, for example from an earlier attempt. Open the link on this page, sign in and paste the address you get.",
+      "browser_token_mancanti": "The pasted address is missing some data ({messaggio}): it was probably only partly copied. Copy all of it, to the end of the line."
     },
     "abort": {
       "reauth_successful": "Credentials updated successfully",
@@ -48,7 +78,8 @@
       "supplies_failed": "Unexpected error while retrieving the PODs from the account. Start the setup again from the beginning (login and OTP included).",
       "otp_exchange_failed": "The OTP code was accepted but completing the login failed. Start the setup again from the beginning (login and OTP included).",
       "accesso_bloccato": "E-Distribuzione is currently blocking automated access with an anti-bot check, so the integration cannot sign in. It does not depend on your credentials: try again later, without insisting.",
-      "app_bloccata": "After the OTP code, E-Distribuzione rejected the official app's client the integration uses to sign in (\"app_blocked\" answer). It does not depend on your credentials or on the code: try the setup again later."
+      "app_bloccata": "After the OTP code, E-Distribuzione rejected the official app's client the integration uses to sign in (\"app_blocked\" answer). It does not depend on your credentials or on the code: try the setup again later.",
+      "account_diverso": "The new sign-in is for another E-Distribuzione account: none of this setup's PODs ({pods}) is on that account. Sign out of the portal in the browser, then try again with the right account."
     }
   },
   "options": {
@@ -282,11 +313,27 @@
   "issues": {
     "accesso_bloccato": {
       "title": "E-Distribuzione is blocking automated access",
-      "description": "E-Distribuzione answers with an anti-bot check instead of granting access, so the integration cannot renew it and consumption data does not update. It does not depend on your setup or credentials, and the data already imported is kept. Do not remove the integration to set it up again: while the block lasts, the new sign-in is refused too. The integration retries on its own every hour and this notice disappears as soon as access is available again."
+      "description": "E-Distribuzione answers with an anti-bot check instead of renewing access, so consumption data does not update. It does not depend on your setup or credentials, and the data already imported is kept. You can restore access right away by signing in again from the browser; otherwise the integration retries on its own every hour and this notice disappears as soon as access is available again. Do not remove the integration to set it up again.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Sign in to E-Distribuzione again",
+            "description": "E-Distribuzione answers with an anti-bot check instead of renewing access, so consumption data does not update. It does not depend on your setup or credentials, and the data already imported is kept.\n\nTo restore access right away, submit: the sign-in request shows in Settings > Devices & services, where you can sign in from the browser. If you prefer to wait, close this window: the integration retries on its own every hour. Do not remove the integration to set it up again."
+          }
+        }
+      }
     },
     "app_bloccata": {
       "title": "E-Distribuzione is refusing the integration's access",
-      "description": "E-Distribuzione answers \"app_blocked\" when access is renewed: one of its security rules is rejecting the official app's client the integration uses. It does not depend on your setup or credentials, and the data already imported is kept. Do not remove the integration to set it up again: the new sign-in goes through the same client and would be refused. The integration retries on its own every hour and this notice disappears as soon as access is available again."
+      "description": "E-Distribuzione answers \"app_blocked\" when access is renewed: one of its security rules is rejecting the official app's client the integration uses. It does not depend on your setup or credentials, and the data already imported is kept. You can restore access right away by signing in again from the browser; otherwise the integration retries on its own every hour and this notice disappears as soon as access is available again. Do not remove the integration to set it up again.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Sign in to E-Distribuzione again",
+            "description": "E-Distribuzione answers \"app_blocked\" when access is renewed: one of its security rules is rejecting the official app's client the integration uses. It does not depend on your setup or credentials, and the data already imported is kept.\n\nTo restore access right away, submit: the sign-in request shows in Settings > Devices & services, where you can sign in from the browser. If you prefer to wait, close this window: the integration retries on its own every hour. Do not remove the integration to set it up again."
+          }
+        }
+      }
     }
   }
 }

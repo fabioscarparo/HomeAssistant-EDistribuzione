@@ -3,10 +3,36 @@
     "step": {
       "user": {
         "title": "Accedi a E-Distribuzione",
-        "description": "Usa le stesse credenziali dell'app o del sito ufficiale E-Distribuzione. Dopo l'accesso ti verrà chiesto un codice OTP, ricevuto via email o SMS: sarà inviato da questa configurazione, non usare codici generati sul sito o nell'app. Se hai l'app o il sito aperti, esci prima da lì: E-Distribuzione limita il numero di sessioni contemporanee per account.{pod_correnti}",
+        "description": "L'accesso dal browser è consigliato: entri dal sito ufficiale di E-Distribuzione, che il blocco degli accessi automatici non ferma, e la password non passa da Home Assistant. In alternativa puoi accedere con password e codice OTP.{pod_correnti}",
+        "menu_options": {
+          "browser_login": "Continua nel browser (consigliato)",
+          "password_login": "Usa password e OTP"
+        }
+      },
+      "password_login": {
+        "title": "Accedi con password e OTP",
+        "description": "Usa le credenziali dell'app o del sito ufficiale E-Distribuzione. Dopo l'accesso ti verrà chiesto un codice OTP ricevuto via email o SMS. Se hai l'app o il sito aperti, esci prima da lì: E-Distribuzione limita le sessioni contemporanee.{pod_correnti}",
         "data": {
           "email": "Email",
           "password": "Password"
+        }
+      },
+      "antibot": {
+        "title": "Accesso automatico bloccato",
+        "description": "E-Distribuzione ha bloccato il login automatico. Puoi completare l'accesso nel browser oppure tornare al login con password e riprovare più tardi.",
+        "menu_options": {
+          "browser_login": "Continua nel browser",
+          "riprova_login": "Torna al login con password"
+        }
+      },
+      "browser_login": {
+        "title": "Accedi dal browser",
+        "description": "Accedi a E-Distribuzione dal browser e incolla qui l'indirizzo che ne esce. La password non passa da Home Assistant.{pod_correnti}\n\n1. Da un computer, apri [la pagina di accesso di E-Distribuzione]({authorization_url}) e accedi con l'account dei tuoi POD. Se nel browser sei già entrato nel portale con un altro account, esci prima. Non usare un telefono con l'app E-Distribuzione: aprirebbe lei l'indirizzo finale.\n2. Dopo l'accesso la pagina resta bianca o mostra un errore: è normale, l'indirizzo finale è pensato per l'app.\n3. Copia quell'indirizzo, che inizia con `eneldist://redirect`. In Chrome ed Edge apri gli strumenti per sviluppatori (F12, oppure ⌥⌘J su Mac) e nella scheda Console copia la riga rossa che lo contiene; in altri browser può comparire nella barra degli indirizzi. Puoi incollare la riga intera.\n4. Incollalo qui sotto e invia. Il link vale solo per questa configurazione.",
+        "data": {
+          "redirect_url": "Indirizzo eneldist://redirect"
+        },
+        "data_description": {
+          "redirect_url": "L'indirizzo che inizia con eneldist://redirect, oppure l'intera riga della console che lo contiene."
         }
       },
       "otp": {
@@ -40,7 +66,11 @@
       "app_bloccata": "E-Distribuzione sta rifiutando il client dell'app ufficiale che l'integrazione usa per accedere (risposta «app_blocked»). Non dipende dalle tue credenziali e insistere ora non serve: riprova più tardi.",
       "risposta_inattesa": "E-Distribuzione ha risposto in modo inatteso durante l'accesso ({messaggio}). Non dipende dalle tue credenziali: il portale potrebbe essere in manutenzione o essere cambiato. Riprova più tardi; se continua, apri una segnalazione su GitHub allegando il log.",
       "errore_imprevisto": "Errore imprevisto durante l'accesso ({messaggio}). I dettagli sono nel log di Home Assistant: riprova, e se si ripete apri una segnalazione su GitHub allegandolo.",
-      "otp_formato": "Il codice OTP è fatto solo di cifre: controlla di averlo copiato per intero, senza lettere."
+      "otp_formato": "Il codice OTP è fatto solo di cifre: controlla di averlo copiato per intero, senza lettere.",
+      "browser_url_mancante": "Nel testo incollato non c'è un indirizzo che inizia con eneldist://redirect. Copia quello che compare dopo l'accesso, non il link di questa pagina.",
+      "browser_negato": "E-Distribuzione ha rifiutato l'autorizzazione («{messaggio}»). Riapri il link e completa l'accesso; se si ripete, riprova più tardi.",
+      "browser_altro_link": "L'indirizzo incollato appartiene a un altro link di accesso, per esempio di un tentativo precedente. Apri il link di questa pagina, accedi e incolla l'indirizzo che ottieni.",
+      "browser_token_mancanti": "Nell'indirizzo incollato mancano dei dati ({messaggio}): probabilmente è stato copiato solo in parte. Copialo per intero, fino alla fine della riga."
     },
     "abort": {
       "reauth_successful": "Credenziali aggiornate con successo",
@@ -48,7 +78,8 @@
       "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova la configurazione da capo (login + OTP inclusi).",
       "otp_exchange_failed": "Il codice OTP è stato accettato ma il completamento dell'accesso è fallito. Riprova la configurazione da capo (login + OTP inclusi).",
       "accesso_bloccato": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot, quindi l'integrazione non riesce ad accedere. Non dipende dalle tue credenziali: riprova più tardi, senza insistere.",
-      "app_bloccata": "Dopo il codice OTP E-Distribuzione ha rifiutato il client dell'app ufficiale che l'integrazione usa per accedere (risposta «app_blocked»). Non dipende dalle tue credenziali né dal codice: riprova la configurazione più tardi."
+      "app_bloccata": "Dopo il codice OTP E-Distribuzione ha rifiutato il client dell'app ufficiale che l'integrazione usa per accedere (risposta «app_blocked»). Non dipende dalle tue credenziali né dal codice: riprova la configurazione più tardi.",
+      "account_diverso": "Il nuovo accesso è di un altro account E-Distribuzione: nessuno dei POD di questa configurazione ({pods}) è su quell'account. Nel browser esci dal portale, poi riprova accedendo con l'account giusto."
     }
   },
   "options": {
@@ -282,11 +313,27 @@
   "issues": {
     "accesso_bloccato": {
       "title": "E-Distribuzione blocca l'accesso automatico",
-      "description": "E-Distribuzione risponde con una verifica antibot invece di concedere l'accesso, quindi l'integrazione non riesce a rinnovarlo e i consumi non si aggiornano. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano. Non rimuovere l'integrazione per configurarla di nuovo: finché il blocco dura, anche il nuovo accesso viene rifiutato. L'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile."
+      "description": "E-Distribuzione risponde con una verifica antibot invece di rinnovare l'accesso, quindi i consumi non si aggiornano. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano. Puoi ripristinare subito l'accesso entrando di nuovo dal browser; altrimenti l'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile. Non rimuovere l'integrazione per configurarla di nuovo.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Accedi di nuovo a E-Distribuzione",
+            "description": "E-Distribuzione risponde con una verifica antibot invece di rinnovare l'accesso, quindi i consumi non si aggiornano. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano.\n\nPer ripristinare subito l'accesso invia: la richiesta di accesso compare in Impostazioni > Dispositivi e servizi, dove puoi entrare dal browser. Se preferisci aspettare chiudi questa finestra: l'integrazione riprova da sola ogni ora. Non rimuovere l'integrazione per configurarla di nuovo."
+          }
+        }
+      }
     },
     "app_bloccata": {
       "title": "E-Distribuzione rifiuta l'accesso dell'integrazione",
-      "description": "E-Distribuzione risponde «app_blocked» al rinnovo dell'accesso: una sua regola di sicurezza sta rifiutando il client dell'app ufficiale che l'integrazione usa. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano. Non rimuovere l'integrazione per configurarla di nuovo: anche il nuovo accesso passa dallo stesso client e verrebbe rifiutato. L'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile."
+      "description": "E-Distribuzione risponde «app_blocked» al rinnovo dell'accesso: una sua regola di sicurezza sta rifiutando il client dell'app ufficiale che l'integrazione usa. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano. Puoi ripristinare subito l'accesso entrando di nuovo dal browser; altrimenti l'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile. Non rimuovere l'integrazione per configurarla di nuovo.",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Accedi di nuovo a E-Distribuzione",
+            "description": "E-Distribuzione risponde «app_blocked» al rinnovo dell'accesso: una sua regola di sicurezza sta rifiutando il client dell'app ufficiale che l'integrazione usa. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano.\n\nPer ripristinare subito l'accesso invia: la richiesta di accesso compare in Impostazioni > Dispositivi e servizi, dove puoi entrare dal browser. Se preferisci aspettare chiudi questa finestra: l'integrazione riprova da sola ogni ora. Non rimuovere l'integrazione per configurarla di nuovo."
+          }
+        }
+      }
     }
   }
 }

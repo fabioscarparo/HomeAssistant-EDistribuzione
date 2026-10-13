@@ -84,6 +84,7 @@ def test_ogni_errore_e_motivo_dei_flussi_esiste():
     usate |= set(re.findall(r'"base": "(\w+)"', sorgente))
     usate |= set(re.findall(r'reason="(\w+)"', sorgente))
     usate |= set(config_flow._ERRORI_RIFIUTO_LOGIN.values()) | {"login_rifiutato"}
+    usate |= set(config_flow._ERRORI_LOGIN_BROWSER.values())
     it = _carica("it")
     definite = (
         set(it["config"]["error"])
@@ -107,6 +108,15 @@ def test_ogni_errore_dell_azione_esiste():
     definite = set(_carica("it")["exceptions"])
     assert {"pod_non_configurato", "intervallo_troppo_ampio"} <= usate, "regex to update"
     assert usate <= definite, usate - definite
+
+
+def test_gli_avvisi_correggibili_hanno_il_passo_di_conferma():
+    """repairs.py shows the "confirm" step for both blocked-access notices."""
+    for lingua in LINGUE:
+        avvisi = _carica(lingua)["issues"]
+        for chiave in ("accesso_bloccato", "app_bloccata"):
+            passo = avvisi[chiave]["fix_flow"]["step"]["confirm"]
+            assert passo["title"] and passo["description"], (lingua, chiave)
 
 
 def test_testi_stesse_chiavi_e_segnaposto_in_ogni_lingua():

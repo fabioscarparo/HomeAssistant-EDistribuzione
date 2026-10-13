@@ -73,7 +73,9 @@ DIREZIONI_CON_FASCE = (MAGNITUDE_PRELEVATA,)
 
 # --- Stored configuration ----------------------------------------------------
 CONF_PODS = "pods"  # list of POD codes, all on the same authenticated account
+CONF_ACCESS_TOKEN = "access_token"
 CONF_REFRESH_TOKEN = "refresh_token"
+CONF_INSTANCE_URL = "instance_url"
 
 CONF_TIPO_POD = "tipo_pod"  # {pod: "scambio"|"produzione"}, in entry.options
 TIPO_POD_SCAMBIO = "scambio"

@@ -32,6 +32,17 @@ async_submit_otp then runs:
     7. _estrai_codice_autorizzazione   find code/state (handling the OAuth
                                         consent on the very first authorization)
     8. _async_exchange_code            POST /oauth2/token
+
+Login in the user's browser, for when E-Distribuzione blocks the automated one
+above: prepare_browser_token_authorization_url gives the link to the official
+portal (OAuth user-agent flow), where the user signs in, and the tokens come
+back in the fragment of the redirect to the app (eneldist://redirect#...). A
+desktop browser cannot open that address, so the user pastes it into the setup
+and tokens_from_browser_redirect reads it. No password reaches Home Assistant
+and no token request leaves it.
+
+Logs never contain passwords, OTP codes, tokens or session addresses: URLs are
+logged without query and fragment (see _per_log).
 """
 from __future__ import annotations
 
@@ -46,7 +57,7 @@ import secrets
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 import aiohttp
 
@@ -135,6 +146,20 @@ _MARCATORI_OTP_INVIATO = (
 # means denying the integration's authorization, so the value is compared in
 # full, not searched as a substring.
 _ETICHETTE_CONSENSO = ("consenti", "allow", "approve", "autorizza", "accetta")
+
+
+# The redirect to the app as the browser shows it: alone, or inside the line
+# Chrome writes in the developer console ("Failed to launch
+# 'eneldist://redirect#access_token=...' because the scheme does not have a
+# registered handler."), quotes included.
+_RE_REDIRECT_APP = re.compile(re.escape(OAUTH_REDIRECT_URI) + r"[^\s'\"<>]*")
+
+
+def _per_log(url) -> str:
+    """URL without query and fragment, for the logs: they can carry session
+    ids, authorization codes or tokens."""
+    parti = urlsplit(str(url))
+    return f"{parti.scheme}://{parti.netloc}{parti.path}"
 
 
 def _contiene(testo: str, marcatori: tuple[str, ...]) -> bool:
@@ -263,6 +288,38 @@ class TokenNonValido(AuthError):
     login with email, password and OTP fixes it."""
 
 
+class InvalidBrowserRedirect(AuthError):
+    """The text pasted at the end of the browser login is not usable.
+
+    'motivo' says why, for the message shown to the user: "mancante" (no app
+    redirect in it), "negato" (the portal refused the authorization,
+    'dettaglio' says how), "altro_tentativo" (it belongs to another link),
+    "token_mancanti" (access or refresh token missing, named in 'dettaglio').
+    """
+
+    def __init__(self, motivo: str, dettaglio: str = "") -> None:
+        super().__init__(f"{motivo}: {dettaglio}" if dettaglio else motivo)
+        self.motivo = motivo
+        self.dettaglio = dettaglio
+
+
+def _parametri_redirect(url: str) -> dict[str, str]:
+    """Parameters of the app redirect, from the fragment (user-agent flow) or
+    the query.
+
+    Decoded with unquote, not as a form like parse_qs does: a "+" in a token
+    is a literal plus, and turned into a space it would give a token that
+    looks fine and is rejected hours later.
+    """
+    parti = urlsplit(url)
+    parametri: dict[str, str] = {}
+    for coppia in (parti.fragment or parti.query).split("&"):
+        chiave, _, valore = coppia.partition("=")
+        if chiave:
+            parametri[unquote(chiave)] = unquote(valore)
+    return parametri
+
+
 def _errore_oauth(codice: str | None, descrizione: str | None, contesto: str) -> AuthError:
     """Exception for an error answered by the OAuth endpoints, as JSON
     ({"error": ..., "error_description": ...}) or in the query of a redirect
@@ -334,6 +391,12 @@ async def _get_following_redirects(
 
     for _ in range(_MAX_REDIRECT_HOPS):
         location = resp.headers.get("Location")
+        _LOGGER.debug(
+            "GET %s: HTTP %s%s",
+            _per_log(getattr(resp, "url", url)),
+            getattr(resp, "status", "?"),
+            f" -> {_per_log(location)}" if location else "",
+        )
         if location is None:
             return resp
 
@@ -420,6 +483,82 @@ class AuthClient:
         self.otp_invio_confermato: bool | None = None
 
     @property
+    def host_attivo(self) -> str:
+        """Host the last login or refresh went through, for logs and
+        diagnostics."""
+        return self._host
+
+    def prepare_browser_token_authorization_url(self) -> str:
+        """Link of the login in the user's browser (OAuth user-agent flow).
+
+        Without prompt=login: a browser already signed in to the portal goes
+        straight on, with whatever account it is signed in with (the config
+        flow checks the PODs on a reauth). A new state on every call: a
+        redirect from an earlier link is rejected.
+        """
+        self._code_verifier = None
+        self._oauth_state = _b64url(secrets.token_bytes(16))
+        params = {
+            "nonce": _b64url(secrets.token_bytes(16)),
+            "display": "touch",
+            "response_type": "token",
+            "scope": OAUTH_SCOPE,
+            "redirect_uri": OAUTH_REDIRECT_URI,
+            "client_id": OAUTH_CLIENT_ID,
+            "state": self._oauth_state,
+        }
+        _LOGGER.debug("Login nel browser: link di autorizzazione preparato")
+        return f"{OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+
+    def tokens_from_browser_redirect(self, testo: str) -> OAuthTokens:
+        """Tokens from the text pasted at the end of the browser login: the
+        app redirect alone, or the whole line of the browser's console."""
+        if self._oauth_state is None:
+            raise InvalidBrowserRedirect("altro_tentativo", "nessun link generato")
+
+        corrispondenza = _RE_REDIRECT_APP.search(testo)
+        if corrispondenza is None:
+            _LOGGER.warning(
+                "Login nel browser: nessun indirizzo %s nel testo incollato (%d caratteri)",
+                OAUTH_REDIRECT_URI,
+                len(testo),
+            )
+            raise InvalidBrowserRedirect("mancante")
+
+        parametri = _parametri_redirect(corrispondenza.group(0))
+        # Names only: the values are the tokens.
+        _LOGGER.debug("Login nel browser: parametri ricevuti %s", sorted(parametri))
+
+        if "error" in parametri:
+            descrizione = parametri.get("error_description", "").replace("+", " ")
+            _LOGGER.warning(
+                "Login nel browser rifiutato da E-Distribuzione: %s (%s)",
+                parametri["error"],
+                descrizione,
+            )
+            if parametri["error"] == "app_blocked":
+                raise AppBloccata(f"Login nel browser: app_blocked ({descrizione})")
+            raise InvalidBrowserRedirect("negato", descrizione or parametri["error"])
+
+        if parametri.get("state") != self._oauth_state:
+            _LOGGER.warning(
+                "Login nel browser: l'indirizzo incollato appartiene a un altro link "
+                "(state diverso da quello di questa configurazione)"
+            )
+            raise InvalidBrowserRedirect("altro_tentativo")
+
+        mancanti = [nome for nome in ("access_token", "refresh_token") if not parametri.get(nome)]
+        if mancanti:
+            _LOGGER.warning("Login nel browser: nel redirect mancano %s", ", ".join(mancanti))
+            raise InvalidBrowserRedirect("token_mancanti", ", ".join(mancanti))
+
+        _LOGGER.info(
+            "Login nel browser riuscito: token ricevuti (istanza %s)",
+            parametri.get("instance_url") or "-",
+        )
+        return self._tokens_from_payload(parametri)
+
+    @property
     def _origin(self) -> str:
         return f"https://{self._host}"
 
@@ -451,6 +590,7 @@ class AuthClient:
         Always assumes an OTP step follows.
         """
         self._host = SF_HOST_PRINCIPALE
+        _LOGGER.debug("Login con password: inizio su %s", self._host)
         try:
             await self._async_begin_login_su_host(email, password)
         except AccessoBloccato:
@@ -463,6 +603,11 @@ class AuthClient:
             self._flow = _LoginFlowState()
             self.otp_invio_confermato = None
             await self._async_begin_login_su_host(email, password)
+        _LOGGER.info(
+            "Login con password: credenziali accettate su %s, invio OTP %s",
+            self._host,
+            "confermato" if self.otp_invio_confermato else "non confermato",
+        )
 
     async def _async_begin_login_su_host(self, email: str, password: str) -> None:
         login_page_html, start_url_value, aura_page_uri, referer = (
@@ -508,6 +653,12 @@ class AuthClient:
             riscrivi=self._su_host,
         )
         login_page_html = await _leggi_testo(resp)
+        _LOGGER.debug(
+            "Pagina di login: %s, HTTP %s, %d caratteri",
+            _per_log(resp.url),
+            resp.status,
+            len(login_page_html),
+        )
         # The 'startURL' parameter of the page we land on contains a 'source=...'
         # token generated by the server on the first hop, which the server
         # requires back in the 'startUrl' field of the next step to validate that
@@ -614,6 +765,13 @@ class AuthClient:
             return_value = azione["returnValue"]
         except (KeyError, IndexError, TypeError) as err:
             raise ParsingError("Forma inattesa della risposta di loginUser") from err
+        # The outcome only: after "OK:" comes an address with the session id.
+        _LOGGER.debug(
+            "loginUser su %s: state %r, esito %s",
+            self._host,
+            azione.get("state"),
+            return_value[:3] if isinstance(return_value, str) else type(return_value).__name__,
+        )
 
         if not isinstance(return_value, str):
             # No answer from the controller at all: the Aura framework itself
@@ -763,6 +921,12 @@ class AuthClient:
         url = self._su_host(self._flow.form_action_url or LOGINFLOW_URL)
         async with self._session.post(url, data=data, headers=headers) as resp:
             body = await _leggi_testo(resp)
+        _LOGGER.debug(
+            "Form OTP (invio codice) su %s: HTTP %s, %d caratteri",
+            self._host,
+            getattr(resp, "status", "?"),
+            len(body),
+        )
 
         self._verifica_non_troppe_sessioni(body, "otp_send_debug.html")
 
@@ -792,9 +956,12 @@ class AuthClient:
             raise AuthError("async_begin_login() deve riuscire prima di async_submit_otp()")
 
         next_url = await self._sottometti_codice_otp(otp_code)
+        _LOGGER.debug("Codice OTP accettato su %s", self._host)
         consent_html = await self._scarica_pagina_dopo_otp(next_url)
         auth_code = await self._estrai_codice_autorizzazione(consent_html)
-        return await self._async_exchange_code(auth_code)
+        tokens = await self._async_exchange_code(auth_code)
+        _LOGGER.info("Login con password e OTP riuscito su %s", self._host)
+        return tokens
 
     async def _sottometti_codice_otp(self, otp_code: str) -> str:
         """Step 5: POST the form with the code; returns the URL found in the
@@ -809,6 +976,7 @@ class AuthClient:
         self._verifica_non_troppe_sessioni(body, "otp_submit_response_debug.html")
 
         if "Codice OTP" in body and "errato" in body.lower():
+            _LOGGER.warning("Codice OTP rifiutato da E-Distribuzione (errato o scaduto)")
             raise InvalidOtp(body[:500])
 
         loc_match = re.search(r'name="Location"\s+content="([^"]+)"', body)
@@ -1008,8 +1176,9 @@ class AuthClient:
         primary answers with the anti-bot page.
         """
         self._host = SF_HOST_PRINCIPALE
+        _LOGGER.debug("Rinnovo dell'accesso: tentativo su %s", self._host)
         try:
-            return await self._async_refresh_su_host(refresh_token)
+            tokens = await self._async_refresh_su_host(refresh_token)
         except AccessoBloccato:
             if self._host == SF_HOST_DIRETTO:
                 raise
@@ -1017,7 +1186,13 @@ class AuthClient:
                 "Refresh bloccato su %s, riprovo via %s", SF_HOST_PRINCIPALE, SF_HOST_DIRETTO
             )
             self._host = SF_HOST_DIRETTO
-            return await self._async_refresh_su_host(refresh_token)
+            tokens = await self._async_refresh_su_host(refresh_token)
+        _LOGGER.debug(
+            "Accesso rinnovato su %s (nuovo refresh_token: %s)",
+            self._host,
+            "sì" if tokens.refresh_token != refresh_token else "no",
+        )
+        return tokens
 
     async def _async_refresh_su_host(self, refresh_token: str) -> OAuthTokens:
         data = {
@@ -1050,6 +1225,13 @@ class AuthClient:
             ) from err
         if status != 200:
             errore = payload if isinstance(payload, dict) else {}
+            _LOGGER.warning(
+                "%s: HTTP %s, errore OAuth %r (%s)",
+                contesto,
+                status,
+                errore.get("error"),
+                errore.get("error_description"),
+            )
             raise _errore_oauth(
                 errore.get("error"), errore.get("error_description"), f"{contesto} ({status})"
             )

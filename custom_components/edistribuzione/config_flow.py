@@ -29,6 +29,7 @@ from .auth import (
     AppBloccata,
     AuthClient,
     ErroreTecnicoPortale,
+    InvalidBrowserRedirect,
     InvalidCredentials,
     InvalidOtp,
     LoginRifiutato,
@@ -38,6 +39,8 @@ from .auth import (
     TroppeSessioni,
 )
 from .const import (
+    CONF_ACCESS_TOKEN,
+    CONF_INSTANCE_URL,
     CONF_ORA_RICHIESTA,
     CONF_PODS,
     CONF_REFRESH_TOKEN,
@@ -72,6 +75,16 @@ _ERRORI_RIFIUTO_LOGIN: dict[type[LoginRifiutato], str] = {
 }
 
 
+# Error of the browser_login step for each reason the pasted text is rejected
+# (see auth.InvalidBrowserRedirect).
+_ERRORI_LOGIN_BROWSER = {
+    "mancante": "browser_url_mancante",
+    "negato": "browser_negato",
+    "altro_tentativo": "browser_altro_link",
+    "token_mancanti": "browser_token_mancanti",
+}
+
+
 def _descrivi_eccezione(err: Exception) -> str:
     """Short technical detail for the "unexpected error" messages."""
     testo = str(err).strip()
@@ -102,6 +115,12 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._auth: AuthClient | None = None
         self._access_token: str | None = None
         self._refresh_token: str | None = None
+        self._instance_url = ""
+        # The browser login has a client of its own: the password login
+        # replaces self._auth on every attempt, and with it the OAuth state
+        # the pasted redirect is checked against.
+        self._auth_browser: AuthClient | None = None
+        self._browser_auth_url: str | None = None
         self._pods_disponibili: list[dict] = []
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
@@ -129,7 +148,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except AccessoBloccato:
             _LOGGER.warning("Reinvio OTP: E-Distribuzione ha risposto con la verifica antibot")
             return "accesso_bloccato", None
-        except Exception:  # noqa: BLE001 - see comment in async_step_user
+        except Exception:  # noqa: BLE001 - see comment in async_step_password_login
             _LOGGER.exception("Reinvio del codice OTP fallito")
             return "cannot_connect", None
         return None, self._testo("otp_reinviato" if confermato else "otp_invio_non_confermato")
@@ -166,6 +185,16 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self._testo("otp_solo_da_qui")
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
+        """Offer browser OAuth first, while retaining the password/OTP route."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["browser_login", "password_login"],
+            description_placeholders={"pod_correnti": self._nota_reauth()},
+        )
+
+    async def async_step_password_login(
+        self, user_input: dict[str, Any] | None = None
+    ):
         errors: dict[str, str] = {}
         messaggio = ""
 
@@ -195,13 +224,11 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.warning("Login rifiutato: troppe sessioni aperte sull'account")
                 errors["base"] = "troppe_sessioni"
             except AccessoBloccato:
-                # Before ParsingError: the anti-bot page does not contain the
-                # expected fields, but the problem is not a markup change.
                 _LOGGER.warning("Login: E-Distribuzione ha risposto con la verifica antibot")
-                errors["base"] = "accesso_bloccato"
+                return await self.async_step_antibot()
             except AppBloccata as err:
                 _LOGGER.warning("Login: E-Distribuzione blocca il client OAuth (%s)", err)
-                errors["base"] = "app_bloccata"
+                return await self.async_step_antibot()
             except ParsingError as err:
                 # A page or answer different from the expected one: maintenance,
                 # or a change on the portal. Not the credentials.
@@ -222,10 +249,67 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_otp()
 
         return self.async_show_form(
-            step_id="user",
+            step_id="password_login",
             data_schema=vol.Schema({vol.Required("email"): str, vol.Required("password"): str}),
             errors=errors,
             description_placeholders={
+                "pod_correnti": self._nota_reauth(),
+                "messaggio": messaggio,
+            },
+        )
+
+    async def async_step_antibot(self, user_input: dict[str, Any] | None = None):
+        """Offer the interactive browser login after an automated block."""
+        return self.async_show_menu(
+            step_id="antibot", menu_options=["browser_login", "riprova_login"]
+        )
+
+    async def async_step_riprova_login(
+        self, user_input: dict[str, Any] | None = None
+    ):
+        """Return to password login without losing the in-progress flow."""
+        return await self.async_step_password_login()
+
+    async def async_step_browser_login(
+        self, user_input: dict[str, Any] | None = None
+    ):
+        """Sign-in in the user's browser.
+
+        The user opens the official portal from the link, signs in there and
+        pastes back the address the browser could not open (eneldist://...),
+        which carries the tokens: see AuthClient.tokens_from_browser_redirect.
+        """
+        if self._auth_browser is None:
+            if self._session is None:
+                self._session = async_create_clientsession(self.hass)
+            self._auth_browser = AuthClient(self._session)
+            self._browser_auth_url = self._auth_browser.prepare_browser_token_authorization_url()
+            _LOGGER.info(
+                "Config flow: login nel browser avviato%s",
+                " (riautenticazione)" if self._reauth_entry else "",
+            )
+
+        errors: dict[str, str] = {}
+        messaggio = ""
+        if user_input is not None:
+            try:
+                tokens = self._auth_browser.tokens_from_browser_redirect(
+                    user_input["redirect_url"]
+                )
+            except InvalidBrowserRedirect as err:
+                errors["base"] = _ERRORI_LOGIN_BROWSER.get(err.motivo, "browser_url_mancante")
+                messaggio = err.dettaglio
+            except AppBloccata:
+                errors["base"] = "app_bloccata"
+            else:
+                return await self._autenticazione_completata(tokens)
+
+        return self.async_show_form(
+            step_id="browser_login",
+            data_schema=vol.Schema({vol.Required("redirect_url"): str}),
+            errors=errors,
+            description_placeholders={
+                "authorization_url": self._browser_auth_url,
                 "pod_correnti": self._nota_reauth(),
                 "messaggio": messaggio,
             },
@@ -275,25 +359,63 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # would fail again the same way.
                 _LOGGER.exception("Parsing della pagina OTP fallito")
                 return self.async_abort(reason="otp_exchange_failed")
-            except Exception:  # noqa: BLE001 - see comment in async_step_user
+            except Exception:  # noqa: BLE001 - see comment in async_step_password_login
                 _LOGGER.exception("Errore imprevisto durante lo scambio del codice OTP")
                 return self.async_abort(reason="otp_exchange_failed")
             else:
-                self._access_token = tokens.access_token
-                self._refresh_token = tokens.refresh_token
-                if self._reauth_entry is not None:
-                    nuovi_dati = {
-                        **self._reauth_entry.data,
-                        CONF_REFRESH_TOKEN: tokens.refresh_token,
-                    }
-                    self.hass.config_entries.async_update_entry(
-                        self._reauth_entry, data=nuovi_dati
-                    )
-                    await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
-                    return self.async_abort(reason="reauth_successful")
-                return await self.async_step_pod()
+                return await self._autenticazione_completata(tokens)
 
         return self._form_otp(errors, avviso)
+
+    async def _autenticazione_completata(self, tokens):
+        """Continue identically after browser OAuth or password/OTP login."""
+        self._access_token = tokens.access_token
+        self._refresh_token = tokens.refresh_token
+        self._instance_url = getattr(tokens, "instance_url", "")
+        if self._reauth_entry is not None:
+            if not await self._stesso_account():
+                return self.async_abort(
+                    reason="account_diverso",
+                    description_placeholders={
+                        "pods": ", ".join(self._reauth_entry.data.get(CONF_PODS, []))
+                    },
+                )
+            nuovi_dati = {
+                **self._reauth_entry.data,
+                CONF_ACCESS_TOKEN: self._access_token,
+                CONF_REFRESH_TOKEN: self._refresh_token,
+                CONF_INSTANCE_URL: self._instance_url,
+            }
+            self.hass.config_entries.async_update_entry(
+                self._reauth_entry, data=nuovi_dati
+            )
+            await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+            return self.async_abort(reason="reauth_successful")
+        return await self.async_step_pod()
+
+    async def _stesso_account(self) -> bool:
+        """On a reauth, whether the new login is for the account of the
+        configured PODs.
+
+        The browser login reuses the portal session the browser already has,
+        whichever account it belongs to: tokens of another account would leave
+        the integration asking for PODs it cannot see. When the PODs cannot be
+        read the login is accepted, rather than blocked on a check.
+        """
+        configurati = set(self._reauth_entry.data.get(CONF_PODS, []))
+        api = ApiClient(async_get_clientsession(self.hass), self._access_token)
+        try:
+            dell_account = {p["IdPod"] for p in await api.async_get_supplies()}
+        except Exception:  # noqa: BLE001 - a check, it must not block the reauth
+            _LOGGER.warning("Riautenticazione: impossibile verificare i POD dell'account", exc_info=True)
+            return True
+        if not dell_account or configurati & dell_account:
+            return True
+        _LOGGER.warning(
+            "Riautenticazione con un altro account: %d POD sull'account, nessuno di quelli configurati",
+            len(dell_account),
+        )
+        return False
 
     # ------------------------------------------------------------------
     # POD selection (initial setup only, not reauth)
@@ -306,7 +428,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not self._pods_disponibili:
             try:
                 self._pods_disponibili = await api.async_get_supplies()
-            except Exception:  # noqa: BLE001 - see comment in async_step_user
+            except Exception:  # noqa: BLE001 - see comment in async_step_password_login
                 # Login and OTP already succeeded: an OTP is single-use, so a
                 # retry of this step would not fix anything without redoing
                 # login+OTP from scratch.
@@ -320,7 +442,12 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             titolo = pods[0] if len(pods) == 1 else f"{len(pods)} POD"
             return self.async_create_entry(
                 title=titolo,
-                data={CONF_PODS: pods, CONF_REFRESH_TOKEN: self._refresh_token},
+                data={
+                    CONF_PODS: pods,
+                    CONF_ACCESS_TOKEN: self._access_token,
+                    CONF_REFRESH_TOKEN: self._refresh_token,
+                    CONF_INSTANCE_URL: self._instance_url,
+                },
             )
 
         # With a single POD on the account there is nothing to choose.
@@ -354,6 +481,8 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(self, entry_data: dict[str, Any]):
         self._reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        _LOGGER.info("Config flow: riautenticazione richiesta")
+        # Same choice as the setup: browser (recommended) or password and OTP.
         return await self.async_step_user()
 
     @staticmethod
@@ -439,6 +568,10 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data=dict(self.config_entry.options))
 
         session = async_get_clientsession(self.hass)
+        tutti_pod = await self._pod_con_token_salvato(session)
+        if tutti_pod is not None:
+            return self._form_aggiungi_pod(pods_attuali, tutti_pod)
+
         auth = AuthClient(session)
         try:
             tokens = await auth.async_refresh_access_token(
@@ -462,13 +595,46 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
                 description_placeholders={"errore": _descrivi_eccezione(err)},
             )
 
+        # Kept, as the coordinator does: a rotated refresh_token would
+        # otherwise be lost with this flow.
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={
+                **self.config_entry.data,
+                CONF_ACCESS_TOKEN: tokens.access_token,
+                CONF_REFRESH_TOKEN: tokens.refresh_token,
+                CONF_INSTANCE_URL: getattr(tokens, "instance_url", ""),
+            },
+        )
         api = ApiClient(session, tokens.access_token)
         try:
             tutti_pod = await api.async_get_supplies()
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Recupero POD fallito nelle opzioni")
             return self.async_abort(reason="supplies_failed")
+        return self._form_aggiungi_pod(pods_attuali, tutti_pod)
 
+    async def _pod_con_token_salvato(self, session) -> list[dict] | None:
+        """The account's PODs with the saved access token, or None when there
+        is none or it no longer works.
+
+        Tried before a refresh: after a login in the browser the saved token
+        works while the refresh from Home Assistant may be blocked, and adding
+        a POD must not depend on it.
+        """
+        access_token = self.config_entry.data.get(CONF_ACCESS_TOKEN)
+        if not access_token:
+            return None
+        try:
+            return await ApiClient(session, access_token).async_get_supplies()
+        except Exception as err:  # noqa: BLE001 - the refresh below is the fallback
+            _LOGGER.info(
+                "Opzioni: access token salvato non utilizzabile (%s), provo il rinnovo",
+                _descrivi_eccezione(err),
+            )
+            return None
+
+    def _form_aggiungi_pod(self, pods_attuali: list[str], tutti_pod: list[dict]):
         pods_disponibili = [p for p in tutti_pod if p["IdPod"] not in pods_attuali]
         if not pods_disponibili:
             return self.async_abort(reason="nessun_pod_da_aggiungere")
