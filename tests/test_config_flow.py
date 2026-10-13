@@ -182,6 +182,16 @@ async def test_dal_login_bloccato_al_browser_con_lo_state_giusto(hass, monkeypat
     assert res["data"][CONF_INSTANCE_URL] == "https://x.my.salesforce.com"
 
 
+async def test_errore_tecnico_propone_l_accesso_dal_browser(hass, edist_mocks):
+    """Issues #4, #5, #6: on the alternative host E-Distribuzione answers the
+    automated login with "Errore Tecnico". Retrying does not help: the setup
+    offers the browser, as for the anti-bot check."""
+    res = await _login_con_errore(hass, edist_mocks, ErroreTecnicoPortale("Errore Tecnico"))
+    assert res["type"] == FlowResultType.MENU
+    assert res["step_id"] == "antibot"
+    assert set(res["menu_options"]) == {"browser_login", "riprova_login"}
+
+
 async def test_menu_login_offre_browser_e_password(hass):
     res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert res["step_id"] == "user"
@@ -246,7 +256,6 @@ async def test_pagina_login_cambiata(hass, edist_mocks):
     ("eccezione", "chiave"),
     [
         (InvalidCredentials, "invalid_auth"),
-        (ErroreTecnicoPortale, "errore_tecnico_portale"),
         (AccountBloccato, "account_bloccato"),
         (PasswordScaduta, "password_scaduta"),
         (LoginRifiutato, "login_rifiutato"),

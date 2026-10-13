@@ -10,10 +10,11 @@ documented in documentation/protocol.md.
 from __future__ import annotations
 
 from datetime import datetime
+from functools import partial
 
 import pytest
 from homeassistant.components.recorder import get_instance
-from homeassistant.components.recorder.statistics import statistics_during_period
+from homeassistant.components.recorder.statistics import get_metadata, statistics_during_period
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_recorder_block_till_done,
@@ -348,18 +349,42 @@ async def test_prelevata_genera_anche_le_serie_per_fascia(recorder_mock, hass):
     assert totale[ultima]["sum"] == pytest.approx(24.0)
 
 
-async def test_immessa_non_genera_serie_per_fascia(recorder_mock, hass):
+def test_statistic_ids_fasce_immessa():
+    assert st.statistic_ids_fasce("IT001E00000001", immessa=True) == {
+        "f1": "edistribuzione:it001e00000001_energia_immessa_f1",
+        "f2": "edistribuzione:it001e00000001_energia_immessa_f2",
+        "f3": "edistribuzione:it001e00000001_energia_immessa_f3",
+    }
+
+
+async def test_immessa_genera_le_sue_serie_per_fascia(recorder_mock, hass):
+    """Issue #7: injection by band too, in its own series - never mixed with
+    the consumption ones."""
     pod = "IT001E00000021"
     giorno = _giorno(*LUNEDI, [0.25] * 96, energy_type="A2")
-    await st.async_import_curva_giornaliera(hass, pod, [giorno], immessa=True)
+    await st.async_import_curva_giornaliera(
+        hass, pod, [giorno], immessa=True, nome="E-Distribuzione X - immissione"
+    )
     await async_recorder_block_till_done(hass)
 
-    assert await _leggi_statistiche(hass, st._sanitize_statistic_id(pod, immessa=True))
-    for f in ("f1", "f2", "f3"):
-        assert not await _leggi_statistiche(
-            hass, st._sanitize_statistic_id(pod, immessa=True, fascia=f)
-        )
-        assert not await _leggi_statistiche(hass, st._sanitize_statistic_id(pod, fascia=f))
+    totale = await _leggi_statistiche(hass, st._sanitize_statistic_id(pod, immessa=True))
+    per_fascia = {
+        f: await _leggi_statistiche(hass, sid)
+        for f, sid in st.statistic_ids_fasce(pod, immessa=True).items()
+    }
+    ultima = max(totale)
+    assert per_fascia["f1"][ultima]["sum"] == pytest.approx(11.0)
+    assert per_fascia["f2"][ultima]["sum"] == pytest.approx(5.0)
+    assert per_fascia["f3"][ultima]["sum"] == pytest.approx(8.0)
+    assert totale[ultima]["sum"] == pytest.approx(24.0)
+    for sid in st.statistic_ids_fasce(pod).values():
+        assert not await _leggi_statistiche(hass, sid)
+
+    sid_f1 = st.statistic_ids_fasce(pod, immessa=True)["f1"]
+    metadati = await get_instance(hass).async_add_executor_job(
+        partial(get_metadata, hass, statistic_ids={sid_f1})
+    )
+    assert next(iter(metadati.values()))[1]["name"] == "E-Distribuzione X - immissione F1"
 
 
 async def test_rettifica_si_propaga_anche_alle_fasce(recorder_mock, hass):

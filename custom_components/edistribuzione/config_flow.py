@@ -69,7 +69,6 @@ STEP_OTP_SCHEMA = vol.Schema({
 # E-Distribuzione answered (see auth.LoginRifiutato).
 _ERRORI_RIFIUTO_LOGIN: dict[type[LoginRifiutato], str] = {
     InvalidCredentials: "invalid_auth",
-    ErroreTecnicoPortale: "errore_tecnico_portale",
     AccountBloccato: "account_bloccato",
     PasswordScaduta: "password_scaduta",
 }
@@ -214,6 +213,12 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self._auth.async_begin_login(
                     user_input["email"].strip(), user_input["password"]
                 )
+            except ErroreTecnicoPortale as err:
+                # What E-Distribuzione answers when it blocks the automated
+                # login on the alternative host (issues #4, #5, #6): retrying
+                # does not help, the browser does.
+                _LOGGER.warning("Login: E-Distribuzione ha risposto %r, propongo il browser", err.messaggio)
+                return await self.async_step_antibot()
             except LoginRifiutato as err:
                 errors["base"] = _ERRORI_RIFIUTO_LOGIN.get(type(err), "login_rifiutato")
                 messaggio = err.messaggio

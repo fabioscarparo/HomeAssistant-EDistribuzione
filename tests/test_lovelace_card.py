@@ -73,3 +73,11 @@ def test_la_card_porta_all_azione_recupera_storico():
     contenuto = lovelace_card.PERCORSO_FILE.read_text(encoding="utf-8")
     assert "/_my_redirect/developer_call_service?service=edistribuzione.recupera_storico" in contenuto
     assert "/_my_redirect/config_flow_start?domain=edistribuzione" in contenuto
+
+
+def test_la_card_legge_l_immissione_per_fascia():
+    """Issue #7: the card reads the injection band series written by
+    statistics.py, with the same naming."""
+    contenuto = lovelace_card.PERCORSO_FILE.read_text(encoding="utf-8")
+    for fascia in ("f1", "f2", "f3"):
+        assert f"_energia_immessa_{fascia}`" in contenuto

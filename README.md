@@ -133,7 +133,7 @@ and says whether your credentials are the problem:
 | Message | What to do |
 |---|---|
 | **E-Distribuzione rejected the email or password** | Use the credentials of the E-Distribuzione customer area, the grid operator, not those of your energy supplier (for example Enel Energia): they are two different accounts. |
-| **Generic technical error** | Not a credentials problem: the portal did not check them. Sign in from the browser, or try again later. |
+| **Generic technical error** | Not a credentials problem: E-Distribuzione is not accepting the automated sign-in. The setup offers to sign in from the browser. |
 | **Account locked or disabled**, **password expired** | Fix it on the official website, then sign in here again. |
 | **Blocking automated access** (anti-bot check) | Not a credentials problem: sign in from the browser. |
 | **Rejecting the official app's client** (`app_blocked`) | E-Distribuzione is refusing the client the integration signs in with. Not a credentials problem: try again later. |
@@ -363,21 +363,21 @@ are needed.
 
 ## F1 / F2 / F3 time bands
 
-For the **consumption** direction the integration also writes three
-statistics, one per ARERA time band, calculated from the same 15-minute
-samples as the total:
+For both directions the integration also writes three statistics, one per
+ARERA time band, calculated from the same 15-minute samples as the total:
 
-| Statistic | Time band |
-|---|---|
-| `edistribuzione:<pod>_energia_f1` | Monday-Friday 08:00-19:00 |
-| `edistribuzione:<pod>_energia_f2` | Monday-Friday 07:00-08:00 and 19:00-23:00, Saturday 07:00-23:00 |
-| `edistribuzione:<pod>_energia_f3` | Monday-Saturday 23:00-07:00, Sundays and national holidays all day |
+| Time band | Consumption | Injection |
+|---|---|---|
+| **F1**: Monday-Friday 08:00-19:00 | `edistribuzione:<pod>_energia_f1` | `edistribuzione:<pod>_energia_immessa_f1` |
+| **F2**: Monday-Friday 07:00-08:00 and 19:00-23:00, Saturday 07:00-23:00 | `edistribuzione:<pod>_energia_f2` | `edistribuzione:<pod>_energia_immessa_f2` |
+| **F3**: Monday-Saturday 23:00-07:00, Sundays and national holidays all day | `edistribuzione:<pod>_energia_f3` | `edistribuzione:<pod>_energia_immessa_f3` |
 
-The three series share the hourly timestamps of the total series, and hour
-by hour F1 + F2 + F3 = total. Like the total, they are recalculated from
-`edistribuzione_curve.db`: on the first import after updating the
-integration they already cover all the history downloaded so far, and they
-follow corrections on their own.
+The three series share the hourly timestamps of the total series of their
+direction, and hour by hour F1 + F2 + F3 = total. Like the total, they are
+recalculated from `edistribuzione_curve.db`: on the first import after
+updating the integration they already cover all the history downloaded so
+far, and they follow corrections on their own. The injection bands appear
+from version 0.8.1, with the first daily update or history fetch.
 
 ### Time zone and holidays
 
@@ -406,12 +406,14 @@ entities:
 ### F1/F2/F3 in the Energy Dashboard
 
 Instead of the total consumption you can add the three bands as three
-separate grid consumption sources, each with its own price.
+separate grid consumption sources, each with its own price; the same goes
+for the injection, as three return to grid sources with their own
+compensation.
 
 > [!IMPORTANT]
-> Never add the total *and* the bands together, or consumption is counted
-> twice. For the same reason, do not run **Configure Energy Dashboard**
-> after switching to the bands: it adds the total only.
+> Never add the total *and* the bands of the same direction together, or
+> the energy is counted twice. For the same reason, do not run **Configure
+> Energy Dashboard** after switching to the bands: it adds the totals only.
 
 ## POD Lovelace card
 
@@ -467,7 +469,8 @@ show_injection: true
 ### Features
 
 The card shows the period's consumption and injection, the F1/F2/F3 split
-and a stacked bar chart by time band:
+of both and a stacked bar chart by time band, with the injection below
+zero:
 
 | View | Bars |
 |---|---|

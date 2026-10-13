@@ -53,14 +53,16 @@ Each POD has TWO distinct series, one per energy direction:
     edistribuzione:<pod>_energia            consumption (MAGNITUDE_PRELEVATA)
     edistribuzione:<pod>_energia_immessa    injection (MAGNITUDE_IMMESSA)
 
-For the directions in DIREZIONI_CON_FASCE (today only consumption) three more
-series are written, one per ARERA band, recomputed from the same 15-minute
-samples and with the same hourly timestamps as the total series:
+For the directions in DIREZIONI_CON_FASCE (both) three more series are written
+per direction, one per ARERA band, recomputed from the same 15-minute samples
+and with the same hourly timestamps as the total series:
 
-    edistribuzione:<pod>_energia_f1 / _f2 / _f3
+    edistribuzione:<pod>_energia_f1 / _f2 / _f3                  consumption
+    edistribuzione:<pod>_energia_immessa_f1 / _f2 / _f3          injection
 
 They must not be added to the Energy Dashboard together with the total series
-(consumption would be counted twice): either the total, or the three bands.
+of the same direction (it would be counted twice): either the total, or the
+three bands.
 
 The direction is decided by whoever calls async_import_curva_giornaliera (which
 magnitude it requested from the API), not by this module: 'energyType' is not
@@ -117,9 +119,9 @@ def statistic_ids(pod: str) -> tuple[str, str]:
     return _sanitize_statistic_id(pod), _sanitize_statistic_id(pod, immessa=True)
 
 
-def statistic_ids_fasce(pod: str) -> dict[str, str]:
-    """{band: statistic_id} of the per-band consumption series."""
-    return {f: _sanitize_statistic_id(pod, fascia=f) for f in fasce.FASCE}
+def statistic_ids_fasce(pod: str, *, immessa: bool = False) -> dict[str, str]:
+    """{band: statistic_id} of the per-band series of one direction."""
+    return {f: _sanitize_statistic_id(pod, immessa=immessa, fascia=f) for f in fasce.FASCE}
 
 
 def _serie_cumulativa(ore: list[tuple[datetime, float]]) -> list[dict]:

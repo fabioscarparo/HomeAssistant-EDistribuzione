@@ -19,7 +19,7 @@
       },
       "antibot": {
         "title": "Accesso automatico bloccato",
-        "description": "E-Distribuzione ha bloccato il login automatico. Puoi completare l'accesso nel browser oppure tornare al login con password e riprovare più tardi.",
+        "description": "E-Distribuzione non ha accettato il login automatico: ha risposto con la verifica antibot o con un generico «Errore Tecnico». Non dipende dalle tue credenziali. Puoi accedere dal browser, che questo blocco non ferma, oppure tornare al login con password e riprovare più tardi.",
         "menu_options": {
           "browser_login": "Continua nel browser",
           "riprova_login": "Torna al login con password"
@@ -59,7 +59,6 @@
       "troppe_sessioni": "E-Distribuzione ha rifiutato l'accesso perché l'account ha troppe sessioni aperte contemporaneamente. Esci dall'app ufficiale e dal sito, attendi qualche minuto e riprova: in questo stato nessun codice OTP viene inviato.",
       "nessun_pod_selezionato": "Seleziona almeno un POD",
       "accesso_bloccato": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot, quindi l'integrazione non riesce ad accedere. Non dipende dalle tue credenziali: riprova più tardi, senza insistere.",
-      "errore_tecnico_portale": "E-Distribuzione ha risposto con un errore tecnico generico («{messaggio}») invece di verificare le credenziali: non significa che email o password siano sbagliate. Di solito dipende da un disservizio del portale o da una limitazione degli accessi automatici. Riprova più tardi; se l'errore compare anche sul sito ufficiale, contatta l'assistenza di E-Distribuzione.",
       "account_bloccato": "E-Distribuzione segnala che l'account è bloccato o disattivato («{messaggio}»). Accedi al sito ufficiale per sbloccarlo, ad esempio reimpostando la password, poi riprova qui.",
       "password_scaduta": "E-Distribuzione segnala che la password è scaduta («{messaggio}»). Cambiala sul sito ufficiale, poi accedi qui con quella nuova.",
       "login_rifiutato": "E-Distribuzione ha rifiutato l'accesso con questo messaggio: «{messaggio}». Se non è chiaro cosa fare, apri una segnalazione su GitHub riportando il messaggio.",

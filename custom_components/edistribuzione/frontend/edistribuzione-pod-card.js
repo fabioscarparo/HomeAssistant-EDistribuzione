@@ -20,9 +20,11 @@
 
 const CARD_TYPE = "edistribuzione-pod-card";
 const EDITOR_TYPE = "edistribuzione-pod-card-editor";
-const VERSION = "0.5.0";
+const VERSION = "0.6.0";
 const SOURCE = "edistribuzione";
 const FASCE = ["f1", "f2", "f3"];
+// Keys of the injection by band (issue #7), next to the consumption ones.
+const FASCE_IMMESSA = FASCE.map((f) => `immessa_${f}`);
 const VISTE = ["day", "week", "month", "year"];
 const HOUR_MS = 3600000;
 const DAY_MS = 24 * HOUR_MS;
@@ -404,6 +406,9 @@ class EdistribuzionePodCard extends HTMLElement {
         f1: `${SOURCE}:${slug}_energia_f1`,
         f2: `${SOURCE}:${slug}_energia_f2`,
         f3: `${SOURCE}:${slug}_energia_f3`,
+        immessa_f1: `${SOURCE}:${slug}_energia_immessa_f1`,
+        immessa_f2: `${SOURCE}:${slug}_energia_immessa_f2`,
+        immessa_f3: `${SOURCE}:${slug}_energia_immessa_f3`,
       };
       const nomeImmessa = nostre.get(ids.immessa)?.name || "";
       pods.push({
@@ -413,6 +418,8 @@ class EdistribuzionePodCard extends HTMLElement {
         ids,
         haFasce: FASCE.every((f) => nostre.has(ids[f])),
         haImmessa: nostre.has(ids.immessa),
+        // Present after the first import with version 0.8.1 or later.
+        haFasceImmessa: FASCE_IMMESSA.every((k) => nostre.has(ids[k])),
         produzione: /produzione/i.test(nomeImmessa),
       });
     }
@@ -522,12 +529,14 @@ class EdistribuzionePodCard extends HTMLElement {
     const ids = [pod.ids.totale];
     if (pod.haFasce) ids.push(pod.ids.f1, pod.ids.f2, pod.ids.f3);
     if (pod.haImmessa) ids.push(pod.ids.immessa);
+    if (pod.haFasceImmessa) ids.push(...FASCE_IMMESSA.map((k) => pod.ids[k]));
 
     try {
       const res = await this._statistiche(ids, iv.inizio, iv.fine, iv.period);
       if (richiesta !== this._richiesta) return; // navigazione più recente in corso
-      const valori = iv.slot.map(() => ({ totale: null, f1: null, f2: null, f3: null, immessa: null }));
-      const chiavi = { [pod.ids.totale]: "totale", [pod.ids.f1]: "f1", [pod.ids.f2]: "f2", [pod.ids.f3]: "f3", [pod.ids.immessa]: "immessa" };
+      const chiaviValori = ["totale", ...FASCE, "immessa", ...FASCE_IMMESSA];
+      const valori = iv.slot.map(() => Object.fromEntries(chiaviValori.map((k) => [k, null])));
+      const chiavi = Object.fromEntries(chiaviValori.map((k) => [pod.ids[k], k]));
       for (const id of ids) {
         for (const r of res[id]) {
           if (r.change === null || r.change === undefined) continue;
@@ -655,6 +664,9 @@ class EdistribuzionePodCard extends HTMLElement {
       f2: sfumatura(base, 1, scuro),
       f3: sfumatura(base, 2, scuro),
       immessa: ritorno,
+      immessa_f1: sfumatura(ritorno, 0, scuro),
+      immessa_f2: sfumatura(ritorno, 1, scuro),
+      immessa_f3: sfumatura(ritorno, 2, scuro),
     };
     return c;
   }
@@ -712,33 +724,23 @@ class EdistribuzionePodCard extends HTMLElement {
     // totals and split by band
     const valori = this._dati?.valori || [];
     const somma = (k) => valori.reduce((acc, v) => (v[k] === null ? acc : (acc ?? 0) + v[k]), null);
-    const totFasce = FASCE.map((f) => somma(f) || 0);
-    const sommaFasce = totFasce.reduce((a, b) => a + b, 0);
+    const sommaFasce = FASCE.reduce((a, f) => a + (somma(f) || 0), 0);
     const prelievo = somma("totale") ?? (sommaFasce || null);
     const mostraImmessa = !!pod?.haImmessa && this._config.show_injection !== false;
+    const nomeImmessa = pod?.produzione ? t("produced") : t("injected");
     const totale = (etichetta, colore, valore) => `
       <div class="total">
         <div class="total-label"><span class="dot" style="background:${rgbCss(colore)}"></span>${escapeHtml(etichetta)}</div>
         <div class="total-value">${this._numero(valore)}<span class="unit">kWh</span></div>
       </div>`;
     $(".totals").innerHTML = totale(t("withdrawn"), colori.totale, prelievo)
-      + (mostraImmessa ? totale(pod.produzione ? t("produced") : t("injected"), colori.immessa, somma("immessa")) : "");
+      + (mostraImmessa ? totale(nomeImmessa, colori.immessa, somma("immessa")) : "");
 
-    $(".fasce").hidden = !pod?.haFasce;
-    if (pod?.haFasce) {
-      $(".split").setAttribute("aria-label",
-        FASCE.map((f, i) => `${f.toUpperCase()} ${this._percentuale(totFasce[i], sommaFasce)}`).join(", "));
-      $(".split").innerHTML = sommaFasce > 0
-        ? FASCE.map((f, i) => (totFasce[i] > 0
-          ? `<span style="flex-grow:${totFasce[i]};background:${rgbCss(colori[f])}"></span>` : "")).join("")
-        : `<span class="vuoto"></span>`;
-      $(".legend").innerHTML = FASCE.map((f, i) => `
-        <div class="legend-item">
-          <div class="legend-name"><span class="dot" style="background:${rgbCss(colori[f])}"></span>${f.toUpperCase()}
-            <span class="legend-pct">${this._percentuale(totFasce[i], sommaFasce)}</span></div>
-          <div class="legend-kwh">${sommaFasce > 0 ? `${this._numero(totFasce[i])} kWh` : "-"}</div>
-        </div>`).join("");
-    }
+    // Injection by band under the consumption one; the two titles only when
+    // both are shown, so the card looks as before without injection bands.
+    const fasceImmessa = mostraImmessa && !!pod?.haFasceImmessa;
+    this._renderFasce($(".fasce"), FASCE, !!pod?.haFasce, fasceImmessa ? t("withdrawn") : "", somma, colori);
+    this._renderFasce($(".fasce-immessa"), FASCE_IMMESSA, fasceImmessa, nomeImmessa, somma, colori);
 
     $(".chart").classList.toggle("loading", this._caricamento);
     this._larghezza = $(".chart").clientWidth || this._larghezza;
@@ -812,6 +814,29 @@ class EdistribuzionePodCard extends HTMLElement {
     });
   }
 
+  _renderFasce(blocco, chiavi, visibile, titolo, somma, colori) {
+    blocco.hidden = !visibile;
+    if (!visibile) return;
+    const tot = chiavi.map((k) => somma(k) || 0);
+    const sommaTot = tot.reduce((a, b) => a + b, 0);
+    const nome = (i) => FASCE[i].toUpperCase();
+    const $ = (sel) => blocco.querySelector(sel);
+    $(".fasce-titolo").hidden = !titolo;
+    $(".fasce-titolo").textContent = titolo;
+    $(".split").setAttribute("aria-label",
+      `${titolo ? `${titolo}: ` : ""}${chiavi.map((_, i) => `${nome(i)} ${this._percentuale(tot[i], sommaTot)}`).join(", ")}`);
+    $(".split").innerHTML = sommaTot > 0
+      ? chiavi.map((k, i) => (tot[i] > 0
+        ? `<span style="flex-grow:${tot[i]};background:${rgbCss(colori[k])}"></span>` : "")).join("")
+      : `<span class="vuoto"></span>`;
+    $(".legend").innerHTML = chiavi.map((k, i) => `
+      <div class="legend-item">
+        <div class="legend-name"><span class="dot" style="background:${rgbCss(colori[k])}"></span>${nome(i)}
+          <span class="legend-pct">${this._percentuale(tot[i], sommaTot)}</span></div>
+        <div class="legend-kwh">${sommaTot > 0 ? `${this._numero(tot[i])} kWh` : "-"}</div>
+      </div>`).join("");
+  }
+
   _struttura() {
     // Structure created only once: later updates only touch texts and
     // attributes, so icons and buttons do not flicker on every period
@@ -840,6 +865,12 @@ class EdistribuzionePodCard extends HTMLElement {
           <div class="error"></div>
           <div class="totals"></div>
           <div class="fasce" hidden>
+            <div class="fasce-titolo" hidden></div>
+            <div class="split" role="img"></div>
+            <div class="legend"></div>
+          </div>
+          <div class="fasce fasce-immessa" hidden>
+            <div class="fasce-titolo" hidden></div>
             <div class="split" role="img"></div>
             <div class="legend"></div>
           </div>
@@ -894,9 +925,10 @@ class EdistribuzionePodCard extends HTMLElement {
     const n = iv.slot.length;
     const mostraImmessa = !!pod?.haImmessa && this._config.show_injection !== false;
     const serie = pod?.haFasce ? FASCE : ["totale"];
+    const serieImmessa = mostraImmessa ? (pod.haFasceImmessa ? FASCE_IMMESSA : ["immessa"]) : [];
 
     const positivo = valori.map((v) => serie.reduce((a, k) => a + (v[k] || 0), 0));
-    const negativo = valori.map((v) => (mostraImmessa ? -(v.immessa || 0) : 0));
+    const negativo = valori.map((v) => -serieImmessa.reduce((a, k) => a + (v[k] || 0), 0));
     const vuoto = valori.every((v, i) => !positivo[i] && !negativo[i] && v.totale === null);
     const scala = scalaArrotondata(Math.min(0, ...negativo), Math.max(0, ...positivo), 5);
 
@@ -954,7 +986,15 @@ class EdistribuzionePodCard extends HTMLElement {
         parti.push(segmento(x, y(acc), y(acc + v), colori[k], j === presenti.length - 1, false));
         acc += v;
       });
-      if (negativo[i]) parti.push(segmento(x, y(0), y(negativo[i]), colori.immessa, false, true));
+      // Injection below zero, stacked the same way: F1 next to the axis, the
+      // outermost segment rounded at the bottom.
+      let giu = 0;
+      const presentiImmessa = serieImmessa.filter((k) => valori[i][k]);
+      presentiImmessa.forEach((k, j) => {
+        const v = valori[i][k];
+        parti.push(segmento(x, y(-giu), y(-(giu + v)), colori[k], false, j === presentiImmessa.length - 1));
+        giu += v;
+      });
     }
 
     // X axis labels without overlaps
@@ -998,7 +1038,9 @@ class EdistribuzionePodCard extends HTMLElement {
       const tw = tip.offsetWidth;
       const lx = cx < W / 2 ? cx + slotW / 2 + 8 : cx - slotW / 2 - 8 - tw;
       tip.style.left = `${Math.max(0, Math.min(W - tw, lx))}px`;
-      tip.style.top = `${top}px`;
+      // With the injection bands the tooltip can be taller than the chart:
+      // it moves up instead of being cut by the bottom of the card.
+      tip.style.top = `${Math.min(top, H - tip.offsetHeight)}px`;
     };
     const nascondi = () => {
       this._hover = null;
@@ -1030,8 +1072,14 @@ class EdistribuzionePodCard extends HTMLElement {
     } else if (v.totale !== null) {
       righe.push(riga(colori.totale, t("withdrawn"), v.totale));
     }
-    if (mostraImmessa && v.immessa) {
-      righe.push(riga(colori.immessa, this._pod.produzione ? t("produced") : t("injected"), v.immessa));
+    const nomeImmessa = this._pod.produzione ? t("produced") : t("injected");
+    const fasceImmessa = this._pod.haFasceImmessa ? FASCE_IMMESSA.filter((k) => v[k]) : [];
+    if (mostraImmessa && fasceImmessa.length > 1) {
+      for (const k of fasceImmessa) righe.push(riga(colori[k], `${nomeImmessa} ${k.slice(-2).toUpperCase()}`, v[k]));
+      if (v.immessa) righe.push(`<div class="tip-row tip-total"><span class="tip-name">${escapeHtml(nomeImmessa)}</span><span class="tip-value">${this._numero(v.immessa)} kWh</span></div>`);
+    } else if (mostraImmessa && v.immessa) {
+      const k = fasceImmessa[0];
+      righe.push(riga(colori[k || "immessa"], k ? `${nomeImmessa} ${k.slice(-2).toUpperCase()}` : nomeImmessa, v.immessa));
     }
     if (!righe.length) righe.push(`<div class="tip-row tip-empty">-</div>`);
     return `<div class="tip-title">${escapeHtml(this._titoloSlot(i))}</div>${righe.join("")}`;
@@ -1128,7 +1176,11 @@ const STILE = `
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 
   .fasce { display: flex; flex-direction: column; gap: 8px; }
-  .fasce[hidden] { display: none; }
+  .fasce[hidden], .fasce-titolo[hidden] { display: none; }
+  .fasce-titolo {
+    font-size: var(--ha-font-size-s, 12px); line-height: 16px; letter-spacing: 0.4px;
+    color: var(--secondary-text-color);
+  }
   .split {
     display: flex; gap: 2px; height: 8px; overflow: hidden; flex: none;
     border-radius: var(--ha-border-radius-pill, 9999px);

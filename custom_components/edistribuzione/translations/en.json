@@ -19,7 +19,7 @@
       },
       "antibot": {
         "title": "Automated sign-in blocked",
-        "description": "E-Distribuzione blocked the automated login. You can complete sign-in in your browser or return to password sign-in and try again later.",
+        "description": "E-Distribuzione did not accept the automated sign-in: it answered with the anti-bot check or with a generic \"Technical error\". It does not depend on your credentials. You can sign in from the browser, which this block does not stop, or go back to password sign-in and try again later.",
         "menu_options": {
           "browser_login": "Continue in browser",
           "riprova_login": "Return to password sign-in"
@@ -59,7 +59,6 @@
       "troppe_sessioni": "E-Distribuzione refused the login because the account has too many concurrent sessions open. Log out of the official app and website, wait a few minutes and try again: in this state no OTP code is sent.",
       "nessun_pod_selezionato": "Select at least one POD",
       "accesso_bloccato": "E-Distribuzione is currently blocking automated access with an anti-bot check, so the integration cannot sign in. It does not depend on your credentials: try again later, without insisting.",
-      "errore_tecnico_portale": "E-Distribuzione answered with a generic technical error (\"{messaggio}\") instead of checking the credentials: it does not mean your email or password are wrong. It usually depends on a portal disruption or on a limit on automated access. Try again later; if the error also shows on the official website, contact E-Distribuzione support.",
       "account_bloccato": "E-Distribuzione reports that the account is locked or disabled (\"{messaggio}\"). Sign in on the official website to unlock it, for example by resetting the password, then try again here.",
       "password_scaduta": "E-Distribuzione reports that the password has expired (\"{messaggio}\"). Change it on the official website, then sign in here with the new one.",
       "login_rifiutato": "E-Distribuzione refused the sign-in with this message: \"{messaggio}\". If it is not clear what to do, open an issue on GitHub quoting the message.",

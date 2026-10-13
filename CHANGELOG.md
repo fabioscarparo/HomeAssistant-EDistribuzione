@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.1
+### Added
+- Injection by F1/F2/F3 time band, in the statistics and in the POD card
+  ([#7](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues/7)).
+
+### Changed
+- When E-Distribuzione answers the automated sign-in with "Errore Tecnico", the setup offers
+  to sign in from the browser.
+
 ## 0.8.0
 ### Added
 - Sign-in from the browser, recommended when E-Distribuzione blocks the automated one.

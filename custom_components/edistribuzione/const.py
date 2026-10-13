@@ -67,9 +67,9 @@ MAGNITUDE_IMMESSA = "A2"  # energy fed into the grid
 MAGNITUDE_TUTTE = (MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA)
 
 # Directions for which the ARERA time-band series (F1/F2/F3, see fasce.py) are
-# also generated. Consumption only: it is the energy billed by time band;
-# injected energy has no per-band price in residential contracts.
-DIREZIONI_CON_FASCE = (MAGNITUDE_PRELEVATA,)
+# also generated: both, as E-Distribuzione accounts consumption and injection
+# by band (issue #7).
+DIREZIONI_CON_FASCE = (MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA)
 
 # --- Stored configuration ----------------------------------------------------
 CONF_PODS = "pods"  # list of POD codes, all on the same authenticated account
