@@ -111,6 +111,11 @@ one. If something goes wrong, see [Sign-in errors](#sign-in-errors).
 
 ### Sign in from the browser
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/sign-in-browser-dark.svg">
+  <img alt="Signing in from the browser in four steps: sign in on E-Distribuzione's website, the page stays blank, copy the red eneldist://redirect line from the Console, paste it into Home Assistant" src="docs/images/sign-in-browser-light.svg">
+</picture>
+
 1. On a computer, open the link shown in the setup and sign in with the
    account of your PODs. If the browser is already signed in to the portal
    with another account, sign out first. Do not use a phone with the
@@ -235,6 +240,11 @@ says which day they refer to. A direction the meter never measured, such as
 the return to grid without solar panels, shows 0 kWh.
 
 ## Energy Dashboard
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/energy-dashboard-dark.svg">
+  <img alt="Where the E-Distribuzione statistics go in the Energy Dashboard, and the F1/F2/F3 bands as an alternative to the total, never together" src="docs/images/energy-dashboard-light.svg">
+</picture>
 
 ### Automatic configuration
 
