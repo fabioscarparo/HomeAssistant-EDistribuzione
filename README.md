@@ -113,22 +113,24 @@ one. If something goes wrong, see [Sign-in errors](#sign-in-errors).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sign-in-browser-dark.svg">
-  <img alt="Signing in from the browser in four steps: sign in on E-Distribuzione's website, the page stays blank, copy the red eneldist://redirect line from the Console, paste it into Home Assistant" src="docs/images/sign-in-browser-light.svg">
+  <img alt="Signing in from the browser in four steps: sign in on E-Distribuzione's website, open the authorization link in the same window, copy the red eneldist://redirect line from the Console, paste it into Home Assistant" src="docs/images/sign-in-browser-light.svg">
 </picture>
 
-1. On a computer, open the link shown in the setup and sign in with the
-   account of your PODs. If the browser is already signed in to the portal
+1. On a computer, open the first link shown in the setup, E-Distribuzione's
+   website, and sign in with the account of your PODs, OTP code included,
+   until you are in the customer area. If the browser is already signed in
    with another account, sign out first. Do not use a phone with the
    E-Distribuzione app: the app would open the final address.
-2. After signing in the page stays blank or shows an error: that is
-   expected, the final address is meant for the app.
+2. In the same window, open the second link, the authorization link. The
+   page stays blank or shows an error: that is expected, the final address
+   is meant for the app.
 3. Copy that address, which starts with `eneldist://redirect`. In Chrome and
    Edge open the developer tools (**F12**, or **⌥⌘J** on a Mac) and copy
    from the **Console** tab the red line that contains it; in other browsers
    it may show in the address bar. You can paste the whole line.
 4. Paste it into the setup and submit.
 
-The link only works for the setup that showed it.
+The authorization link only works for the setup that showed it.
 
 ### Sign in with password and OTP
 
@@ -384,7 +386,7 @@ and says whether your credentials are the problem:
 | **Blocking automated access** (anti-bot check) | Not a credentials problem: sign in from the browser. |
 | **Rejecting the official app's client** (`app_blocked`) | E-Distribuzione is refusing the client the integration signs in with. Not a credentials problem: try again later. |
 | **No address starting with eneldist://redirect** | Copy the address shown after signing in, not the link of the setup. |
-| **The address belongs to another sign-in link** | Open the link of the current setup, sign in and paste the new address. |
+| **The address belongs to another sign-in link** | Open the authorization link of the current setup and paste the new address. |
 | **The address is missing some data** | It was only partly copied: copy all of it, to the end of the line. |
 | **Another E-Distribuzione account** (when signing in again) | The browser was signed in with another account: sign out of the portal and try again. |
 | **Unexpected answer** | The portal may be under maintenance or may have changed. If it keeps happening, open an issue with the log. |

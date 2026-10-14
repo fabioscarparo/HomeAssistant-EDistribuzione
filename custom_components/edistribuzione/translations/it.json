@@ -27,7 +27,7 @@
       },
       "browser_login": {
         "title": "Accedi dal browser",
-        "description": "Accedi a E-Distribuzione dal browser e incolla qui l'indirizzo che ne esce. La password non passa da Home Assistant.{pod_correnti}\n\n1. Da un computer, apri [la pagina di accesso di E-Distribuzione]({authorization_url}) e accedi con l'account dei tuoi POD. Se nel browser sei già entrato nel portale con un altro account, esci prima. Non usare un telefono con l'app E-Distribuzione: aprirebbe lei l'indirizzo finale.\n2. Dopo l'accesso la pagina resta bianca o mostra un errore: è normale, l'indirizzo finale è pensato per l'app.\n3. Copia quell'indirizzo, che inizia con `eneldist://redirect`. In Chrome ed Edge apri gli strumenti per sviluppatori (F12, oppure ⌥⌘J su Mac) e nella scheda Console copia la riga rossa che lo contiene; in altri browser può comparire nella barra degli indirizzi. Puoi incollare la riga intera.\n4. Incollalo qui sotto e invia. Il link vale solo per questa configurazione.",
+        "description": "Accedi a E-Distribuzione dal browser e incolla qui l'indirizzo che ne esce. La password non passa da Home Assistant.{pod_correnti}\n\n1. Da un computer, apri [il sito di E-Distribuzione]({login_url}) e accedi con l'account dei tuoi POD, codice OTP compreso, fino all'area clienti. Se nel browser sei già entrato con un altro account, esci prima; se sei già entrato con quello giusto, passa al punto 2. Non usare un telefono con l'app E-Distribuzione: aprirebbe lei l'indirizzo finale.\n2. Nella stessa finestra apri [il link di autorizzazione]({authorization_url}). La pagina resta bianca o mostra un errore: è normale, l'indirizzo finale è pensato per l'app.\n3. Copia quell'indirizzo, che inizia con `eneldist://redirect`. In Chrome ed Edge apri gli strumenti per sviluppatori (F12, oppure ⌥⌘J su Mac) e nella scheda Console copia la riga rossa che lo contiene; in altri browser può comparire nella barra degli indirizzi. Puoi incollare la riga intera.\n4. Incollalo qui sotto e invia. Il link di autorizzazione vale solo per questa configurazione.",
         "data": {
           "redirect_url": "Indirizzo eneldist://redirect"
         },
@@ -67,8 +67,8 @@
       "errore_imprevisto": "Errore imprevisto durante l'accesso ({messaggio}). I dettagli sono nel log di Home Assistant: riprova, e se si ripete apri una segnalazione su GitHub allegandolo.",
       "otp_formato": "Il codice OTP è fatto solo di cifre: controlla di averlo copiato per intero, senza lettere.",
       "browser_url_mancante": "Nel testo incollato non c'è un indirizzo che inizia con eneldist://redirect. Copia quello che compare dopo l'accesso, non il link di questa pagina.",
-      "browser_negato": "E-Distribuzione ha rifiutato l'autorizzazione («{messaggio}»). Riapri il link e completa l'accesso; se si ripete, riprova più tardi.",
-      "browser_altro_link": "L'indirizzo incollato appartiene a un altro link di accesso, per esempio di un tentativo precedente. Apri il link di questa pagina, accedi e incolla l'indirizzo che ottieni.",
+      "browser_negato": "E-Distribuzione ha rifiutato l'autorizzazione («{messaggio}»). Riapri il link di autorizzazione; se si ripete, riprova più tardi.",
+      "browser_altro_link": "L'indirizzo incollato appartiene a un altro link di accesso, per esempio di un tentativo precedente. Apri il link di autorizzazione di questa pagina e incolla l'indirizzo che ottieni.",
       "browser_token_mancanti": "Nell'indirizzo incollato mancano dei dati ({messaggio}): probabilmente è stato copiato solo in parte. Copialo per intero, fino alla fine della riga."
     },
     "abort": {

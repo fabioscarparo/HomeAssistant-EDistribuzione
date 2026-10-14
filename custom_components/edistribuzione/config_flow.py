@@ -46,6 +46,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_TIPO_POD,
     DOMAIN,
+    LOGIN_PAGE_URL,
     ORA_MINIMA_RICHIESTA,
     TIPO_POD_DEFAULT,
     TIPO_POD_PRODUZIONE,
@@ -280,9 +281,11 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ):
         """Sign-in in the user's browser.
 
-        The user opens the official portal from the link, signs in there and
-        pastes back the address the browser could not open (eneldist://...),
-        which carries the tokens: see AuthClient.tokens_from_browser_redirect.
+        The user signs in to the official portal, opens the authorization
+        link in the same browser and pastes back the address the browser could
+        not open (eneldist://...), which carries the tokens: see
+        AuthClient.prepare_browser_token_authorization_url and
+        tokens_from_browser_redirect.
         """
         if self._auth_browser is None:
             if self._session is None:
@@ -314,6 +317,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({vol.Required("redirect_url"): str}),
             errors=errors,
             description_placeholders={
+                "login_url": LOGIN_PAGE_URL,
                 "authorization_url": self._browser_auth_url,
                 "pod_correnti": self._nota_reauth(),
                 "messaggio": messaggio,

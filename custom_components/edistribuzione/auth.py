@@ -34,9 +34,9 @@ async_submit_otp then runs:
     8. _async_exchange_code            POST /oauth2/token
 
 Login in the user's browser, for when E-Distribuzione blocks the automated one
-above: prepare_browser_token_authorization_url gives the link to the login page
-of the official portal (OAuth user-agent flow), where the user signs in, and
-the tokens come back in the fragment of the redirect to the app
+above: the user signs in to the official portal, then opens in the same browser
+the link of prepare_browser_token_authorization_url (OAuth user-agent flow),
+and the tokens come back in the fragment of the redirect to the app
 (eneldist://redirect#...). A desktop browser cannot open that address, so the
 user pastes it into the setup and tokens_from_browser_redirect reads it. No
 password reaches Home Assistant and no token request leaves it.
@@ -63,7 +63,6 @@ import aiohttp
 
 from .const import (
     AURA_ENDPOINT,
-    LOGIN_PAGE_URL,
     LOGINFLOW_URL,
     OAUTH_AUTHORIZE_URL,
     OAUTH_CLIENT_ID,
@@ -490,17 +489,21 @@ class AuthClient:
         return self._host
 
     def prepare_browser_token_authorization_url(self) -> str:
-        """Link of the login in the user's browser (OAuth user-agent flow).
+        """Link of the authorization in the user's browser (OAuth user-agent
+        flow), to open once signed in to the portal in the same browser
+        (LOGIN_PAGE_URL).
 
-        The link opens the login page of the custom domain with the
-        authorization as startURL, not /oauth2/authorize directly: from there
-        Salesforce sends a browser that is not signed in to the login page of
-        the canonical domain (edistribuzione.my.site.com), which answers the
-        sign-in with "Errore Tecnico" (issue #6). After the sign-in the portal
-        goes on to startURL, a path on the same host, and from there to the
-        redirect to the app.
+        The portal goes on to the redirect to the app only in a browser that
+        is already signed in. One that is not gets sent to the login of the
+        canonical domain (edistribuzione.my.site.com), which answers "Errore
+        Tecnico" (issue #6); and the login page of the custom domain, after
+        the OTP, lands on the portal's home page whatever its startURL (issue
+        #8). Hence two steps: sign in, then open this link.
 
-        A new state on every call: a redirect from an earlier link is rejected.
+        Without prompt=login: the browser goes straight on with whatever
+        account it is signed in with (the config flow checks the PODs on a
+        reauth). A new state on every call: a redirect from an earlier link is
+        rejected.
         """
         self._code_verifier = None
         self._oauth_state = _b64url(secrets.token_bytes(16))
@@ -513,9 +516,8 @@ class AuthClient:
             "client_id": OAUTH_CLIENT_ID,
             "state": self._oauth_state,
         }
-        autorizzazione = f"{urlsplit(OAUTH_AUTHORIZE_URL).path}?{urlencode(params)}"
         _LOGGER.debug("Login nel browser: link di autorizzazione preparato")
-        return f"{LOGIN_PAGE_URL}?{urlencode({'startURL': autorizzazione})}"
+        return f"{OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
     def tokens_from_browser_redirect(self, testo: str) -> OAuthTokens:
         """Tokens from the text pasted at the end of the browser login: the

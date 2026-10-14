@@ -169,9 +169,12 @@ async def test_dal_login_bloccato_al_browser_con_lo_state_giusto(hass, monkeypat
     res = await hass.config_entries.flow.async_configure(
         res["flow_id"], {"next_step_id": "browser_login"}
     )
+    # Two links: first the portal's sign-in, then the authorization.
+    assert res["description_placeholders"]["login_url"] == (
+        "https://private.e-distribuzione.it/PortaleClienti/s/login/"
+    )
     link = res["description_placeholders"]["authorization_url"]
-    start_url = parse_qs(urlsplit(link).query)["startURL"][0]
-    state = parse_qs(urlsplit(start_url).query)["state"][0]
+    state = parse_qs(urlsplit(link).query)["state"][0]
     riga = (
         f"Failed to launch 'eneldist://redirect#access_token=00D!AQ&refresh_token=5Aep"
         f"&instance_url=https%3A%2F%2Fx.my.salesforce.com&state={state}' because the scheme "
