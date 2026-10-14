@@ -34,12 +34,12 @@ async_submit_otp then runs:
     8. _async_exchange_code            POST /oauth2/token
 
 Login in the user's browser, for when E-Distribuzione blocks the automated one
-above: prepare_browser_token_authorization_url gives the link to the official
-portal (OAuth user-agent flow), where the user signs in, and the tokens come
-back in the fragment of the redirect to the app (eneldist://redirect#...). A
-desktop browser cannot open that address, so the user pastes it into the setup
-and tokens_from_browser_redirect reads it. No password reaches Home Assistant
-and no token request leaves it.
+above: prepare_browser_token_authorization_url gives the link to the login page
+of the official portal (OAuth user-agent flow), where the user signs in, and
+the tokens come back in the fragment of the redirect to the app
+(eneldist://redirect#...). A desktop browser cannot open that address, so the
+user pastes it into the setup and tokens_from_browser_redirect reads it. No
+password reaches Home Assistant and no token request leaves it.
 
 Logs never contain passwords, OTP codes, tokens or session addresses: URLs are
 logged without query and fragment (see _per_log).
@@ -63,6 +63,7 @@ import aiohttp
 
 from .const import (
     AURA_ENDPOINT,
+    LOGIN_PAGE_URL,
     LOGINFLOW_URL,
     OAUTH_AUTHORIZE_URL,
     OAUTH_CLIENT_ID,
@@ -491,10 +492,15 @@ class AuthClient:
     def prepare_browser_token_authorization_url(self) -> str:
         """Link of the login in the user's browser (OAuth user-agent flow).
 
-        Without prompt=login: a browser already signed in to the portal goes
-        straight on, with whatever account it is signed in with (the config
-        flow checks the PODs on a reauth). A new state on every call: a
-        redirect from an earlier link is rejected.
+        The link opens the login page of the custom domain with the
+        authorization as startURL, not /oauth2/authorize directly: from there
+        Salesforce sends a browser that is not signed in to the login page of
+        the canonical domain (edistribuzione.my.site.com), which answers the
+        sign-in with "Errore Tecnico" (issue #6). After the sign-in the portal
+        goes on to startURL, a path on the same host, and from there to the
+        redirect to the app.
+
+        A new state on every call: a redirect from an earlier link is rejected.
         """
         self._code_verifier = None
         self._oauth_state = _b64url(secrets.token_bytes(16))
@@ -507,8 +513,9 @@ class AuthClient:
             "client_id": OAUTH_CLIENT_ID,
             "state": self._oauth_state,
         }
+        autorizzazione = f"{urlsplit(OAUTH_AUTHORIZE_URL).path}?{urlencode(params)}"
         _LOGGER.debug("Login nel browser: link di autorizzazione preparato")
-        return f"{OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+        return f"{LOGIN_PAGE_URL}?{urlencode({'startURL': autorizzazione})}"
 
     def tokens_from_browser_redirect(self, testo: str) -> OAuthTokens:
         """Tokens from the text pasted at the end of the browser login: the

@@ -80,11 +80,27 @@ class TestOAuthBrowser:
 
         client = self._client()
         url = client.prepare_browser_token_authorization_url()
-        params = parse_qs(urlparse(url).query)
+        start_url = parse_qs(urlparse(url).query)["startURL"][0]
+        params = parse_qs(urlparse(start_url).query)
 
         assert params["response_type"] == ["token"]
         assert params["state"] == [client._oauth_state]
         assert params["redirect_uri"] == [auth.OAUTH_REDIRECT_URI]
+
+    def test_url_browser_parte_dal_login_del_dominio_personalizzato(self):
+        """Issue #6: /oauth2/authorize opened directly sends the browser to
+        the login of edistribuzione.my.site.com, which answers "Errore
+        Tecnico". The link starts from the login page of the custom domain,
+        with the authorization as a relative startURL on the same host."""
+        from urllib.parse import parse_qs, urlparse
+
+        url = urlparse(self._client().prepare_browser_token_authorization_url())
+        start_url = urlparse(parse_qs(url.query)["startURL"][0])
+
+        assert url.netloc == auth.SF_HOST_PRINCIPALE
+        assert url.path == "/PortaleClienti/s/login/"
+        assert not start_url.netloc
+        assert start_url.path == "/PortaleClienti/services/oauth2/authorize"
 
     def test_redirect_browser_estrae_token_e_istanza(self):
         from urllib.parse import urlencode
