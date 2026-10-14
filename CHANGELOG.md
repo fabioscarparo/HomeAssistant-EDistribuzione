@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.4
+### Fixed
+- Sign-in from the browser in two steps: first sign in on E-Distribuzione's website, then open
+  the authorization link in the same window. With 0.8.3 the portal ended on its home page after
+  the OTP code, without the address to paste
+  ([#8](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues/8)).
+
 ## 0.8.3
 ### Fixed
 - The sign-in from the browser opens the login page of private.e-distribuzione.it. Until now a
