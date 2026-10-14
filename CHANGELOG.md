@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.3
+### Fixed
+- The sign-in from the browser opens the login page of private.e-distribuzione.it. Until now a
+  browser not yet signed in to the portal ended on the login of edistribuzione.my.site.com,
+  which answers "Errore Tecnico"
+  ([#6](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues/6)).
+
 ## 0.8.2
 ### Fixed
 - After an update the injection by time band appears at the first restart, built from the data
