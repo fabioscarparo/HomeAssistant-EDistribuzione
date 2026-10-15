@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.5
+### Fixed
+- A history fetch no longer discards the whole period when its first day has no data, for
+  example a day before the meter was activated or not published yet.
+
+### Changed
+- The debug log says, for each direction, how many days E-Distribuzione returned and how many
+  of them had data.
+
 ## 0.8.4
 ### Fixed
 - Sign-in from the browser in two steps: first sign in on E-Distribuzione's website, then open
