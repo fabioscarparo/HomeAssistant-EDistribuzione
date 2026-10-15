@@ -102,8 +102,13 @@ def _giorni_ricevuti(curva: list[dict]) -> set[date]:
 
 def _curva_ha_dati(curva: list[dict]) -> bool:
     """True if the async_get_daily_load_profile response really contains
-    samples, not just an empty structure."""
-    return bool(curva) and bool(curva[0].get("readings", {}).get("sampleValues"))
+    samples, not just an empty structure.
+
+    Any day counts, not only the first: a range that starts before the meter
+    was activated, or a response that lists a day not published yet first,
+    still carries the days that have samples.
+    """
+    return any(elemento.get("readings", {}).get("sampleValues") for elemento in curva)
 
 
 def _magnitude_onorata(curva: list[dict], magnitude_richiesta: str) -> bool:
@@ -627,6 +632,18 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
             curva = await self._async_get_daily_load_profile(
                 pod, data_da, data_a, magnitude=magnitude
             )
+            giorni_ricevuti = _giorni_ricevuti(curva)
+            # What E-Distribuzione returned, for bug reports: a response
+            # with days but no samples is not the same as no response at all.
+            _LOGGER.debug(
+                "POD %s, magnitude %s, %s - %s: %d giorni nella risposta, %d con campioni",
+                pod,
+                magnitude,
+                data_da,
+                data_a,
+                len(curva),
+                len(giorni_ricevuti),
+            )
             if not _curva_ha_dati(curva):
                 continue
             if not _magnitude_onorata(curva, magnitude):
@@ -644,7 +661,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 self.hass, pod, curva, immessa=immessa, nome=self._nome_serie(pod, immessa)
             )
 
-            risultati[magnitude] = {"giorni_ricevuti": _giorni_ricevuti(curva)}
+            risultati[magnitude] = {"giorni_ricevuti": giorni_ricevuti}
         return risultati
 
     # ------------------------------------------------------------------

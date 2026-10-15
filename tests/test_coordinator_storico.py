@@ -108,6 +108,23 @@ async def test_risposta_senza_misure_fa_fallire_l_azione(
     assert errore.value.translation_key == "nessun_dato_importato"
 
 
+async def test_primo_giorno_vuoto_non_scarta_gli_altri(
+    hass, make_edist_coordinator, _senza_token, _import_statistiche
+):
+    """Issue #9: a first day without samples (before the meter's activation,
+    or not published yet) used to discard the whole period."""
+    coordinator = make_edist_coordinator(pods=[POD_A])
+    coordinator._api.async_get_daily_load_profile = AsyncMock(
+        return_value=[{"readings": {"sampleDate": "20260910", "sampleValues": []}}]
+        + _curva([date(2026, 9, 11), DATA_A])
+    )
+
+    with freeze_time(OGGI):
+        await coordinator.async_recupera_storico(DATA_DA, DATA_A)
+
+    assert _import_statistiche.await_count == 2
+
+
 async def test_successo_importa_entrambe_le_direzioni(
     hass, make_edist_coordinator, _senza_token, _import_statistiche
 ):
