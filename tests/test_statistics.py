@@ -172,6 +172,18 @@ def test_curva_fotovoltaica_lascia_a_zero_le_ore_notturne():
     assert kwh_alle("2026-08-01T21:00:00+00:00") == 0.0  # 23:00 local
 
 
+def test_giorno_corto_di_marzo_con_96_campioni_diventa_23_ore():
+    """Issue #10: every hour of 29/03/2026 with its own value, the last one
+    included, and the total of the day as on E-Distribuzione's portal."""
+    valori = [0.25] * 8 + [0.0] * 4 + [0.5] * 84
+    risultato = _ore_da_giorni([_giorno("20260329", "2026-03-28T23:00:00.000+00:00", valori)])
+
+    assert len(risultato) == 23
+    assert risultato[2] == (datetime.fromisoformat("2026-03-29T01:00:00+00:00"), 2.0)  # 03:00
+    assert risultato[-1] == (datetime.fromisoformat("2026-03-29T21:00:00+00:00"), 2.0)  # 23:00
+    assert sum(kwh for _, kwh in risultato) == pytest.approx(2.0 + 42.0)
+
+
 def test_aggrega_ore_risposta_vuota():
     assert st._aggrega_ore([]) == []
 

@@ -15,9 +15,8 @@ not duplicated.
 
 Every function here is synchronous (blocking, stdlib sqlite3) - the caller
 (statistics.py) runs it via hass.async_add_executor_job, never directly in the
-event loop. No Home Assistant dependency except dt_util for the timestamp
-computation (the same arithmetic already used elsewhere in the project), so it
-stays testable with a plain tmp_path, without the 'hass' fixture.
+event loop. Apart from percorso_predefinito they do not use Home Assistant,
+so they stay testable with a plain tmp_path, without the 'hass' fixture.
 """
 from __future__ import annotations
 
@@ -26,7 +25,8 @@ import sqlite3
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 
 from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
+
+from .fasce import FUSO_ITALIA
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,15 +60,49 @@ def _connetti(db_path: str) -> sqlite3.Connection:
     return con
 
 
+def _orari_del_giorno(inizio: datetime, frequenza_minuti: int, quanti: int):
+    """Function from a sample id to its UTC instant, or None for a
+    quarter-hour that does not exist that day.
+
+    Normally the samples follow the real clock: id=1 at 'inizio', the local
+    midnight, and each id 'frequenza_minuti' later. On the days of the clock
+    change E-Distribuzione can instead send as many samples as on a normal
+    day, one per slot of the local clock: on the last Sunday of March the
+    slots of 02:00-03:00, an hour that does not exist, come at zero (issue
+    #10). There the real-clock arithmetic would shift every later sample one
+    hour forward and push the last hour into the next day, so the samples go
+    on the local clock instead and the missing hour is dropped. On the last
+    Sunday of October the repeated hour gets the first of the two 02:00.
+    """
+    inizio_utc = inizio.astimezone(UTC)
+    mezzanotte = inizio.astimezone(FUSO_ITALIA).replace(tzinfo=None)
+    fine_utc = (mezzanotte + timedelta(days=1)).replace(tzinfo=FUSO_ITALIA).astimezone(UTC)
+    passo = timedelta(minutes=frequenza_minuti)
+    slot_reali = round((fine_utc - inizio_utc) / passo)
+    slot_orologio = round(timedelta(days=1) / passo)
+
+    if quanti != slot_orologio or slot_reali == slot_orologio:
+        return lambda indice: inizio_utc + (indice - 1) * passo
+
+    def sull_orologio(indice: int) -> datetime | None:
+        locale = mezzanotte + (indice - 1) * passo
+        istante = locale.replace(tzinfo=FUSO_ITALIA).astimezone(UTC)
+        # A local time that does not exist does not survive the round trip.
+        if istante.astimezone(FUSO_ITALIA).replace(tzinfo=None) != locale:
+            return None
+        return istante
+
+    return sull_orologio
+
+
 def estrai_campioni(dati_grezzi: list[dict]) -> list[tuple[datetime, float]]:
     """Extract (timestamp_utc, kwh) from an
     ApiClient.async_get_daily_load_profile response - one dict per day, each
     with up to 96 fifteen-minute samples.
 
     Each sample's timestamp is initialSample (absolute UTC, id=1) +
-    (id-1) * sampleFrequency minutes - no manual daylight-saving logic, the
-    server already handles the change in the absolute timestamp (see the
-    statistics.py docstring for the arithmetic check).
+    (id-1) * sampleFrequency minutes, except on the days of the clock change
+    when the samples come on the local clock (see _orari_del_giorno).
 
     Rows with missing or unparseable fields are dropped with a warning instead
     of failing the whole import: a single corrupted sample must not lose the
@@ -103,6 +137,7 @@ def estrai_campioni(dati_grezzi: list[dict]) -> list[tuple[datetime, float]]:
             )
             continue
 
+        orario = _orari_del_giorno(inizio_campione_1, frequenza_minuti, len(sample_values))
         for campione in sample_values:
             try:
                 indice = int(campione["id"])
@@ -111,9 +146,17 @@ def estrai_campioni(dati_grezzi: list[dict]) -> list[tuple[datetime, float]]:
                 _LOGGER.warning("Campione con id/val non validi, saltato: %r", campione)
                 continue
 
-            ts_utc = dt_util.as_utc(
-                inizio_campione_1 + timedelta(minutes=(indice - 1) * frequenza_minuti)
-            )
+            ts_utc = orario(indice)
+            if ts_utc is None:
+                if valore_kwh:
+                    _LOGGER.warning(
+                        "%s, campione %d: cade nell'ora che non esiste per il cambio "
+                        "dell'ora, %s kWh scartati",
+                        readings.get("sampleDate"),
+                        indice,
+                        valore_kwh,
+                    )
+                continue
             campioni.append((ts_utc, valore_kwh))
 
     return campioni

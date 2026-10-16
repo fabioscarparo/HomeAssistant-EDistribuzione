@@ -38,11 +38,12 @@ raw_storage.estrai_campioni for the parsing):
       }
     ]
 
-'initialSample' is a full absolute UTC timestamp of sample id=1: each sample's
-timestamp is obtained by adding (id-1) * sampleFrequency minutes - deterministic,
-no flag interpretation for the clock change. id=1 falls exactly at local
-midnight of the requested day, id=96 on the last quarter-hour of the same local
-day.
+'initialSample' is a full absolute UTC timestamp of sample id=1, at local
+midnight of the requested day: each sample's timestamp is obtained by adding
+(id-1) * sampleFrequency minutes, and id=96 falls on the last quarter-hour of
+the same local day. On the days of the clock change the response can instead
+hold 96 samples on the local clock, the hour that does not exist in March at
+zero: raw_storage.estrai_campioni places them on that clock.
 
 'val' is energy in kWh per 15-minute interval, not average power in kW: the
 total of a full month's curve matches the delta of two consecutive official

@@ -73,8 +73,10 @@ def test_piu_giorni_nella_stessa_risposta():
 
 # --- Daylight saving time change ----------------------------------------------
 #
-# initialSample is an absolute UTC timestamp, so the computation
-# initialSample + (id-1)*frequency needs to know nothing about DST.
+# initialSample is an absolute UTC timestamp: when a clock-change day has as
+# many samples as its real quarter-hours (92 or 100), initialSample +
+# (id-1)*frequency places them. When it has 96, one per slot of the local
+# clock, they go on that clock (issue #10).
 
 def test_giorno_lungo_di_ottobre_produce_100_campioni():
     # 25/10/2026, end of daylight saving time: 25 local hours = 100 samples of 15 minutes
@@ -92,6 +94,54 @@ def test_giorno_corto_di_marzo_produce_92_campioni():
     )
     assert len(campioni) == 92
     assert sum(kwh for _, kwh in campioni) == 92.0
+
+
+def _ore_locali(campioni) -> list[str]:
+    return [ts.astimezone(FUSO_ITALIA).strftime("%d %H:%M %Z") for ts, _ in campioni]
+
+
+def test_giorno_corto_di_marzo_con_96_campioni_sull_orologio_locale():
+    """Issue #10: on 29/03/2026 E-Distribuzione sends 96 quarter-hours, one
+    per slot of the local clock, with 02:00-03:00 (an hour that does not
+    exist) at zero. Nothing after it moves an hour forward, and the last hour
+    stays in its own day instead of overwriting the first of the next."""
+    valori = [1.0] * 8 + [0.0] * 4 + [2.0] * 84
+    campioni = rs.estrai_campioni(
+        [_giorno("20260329", "2026-03-28T23:00:00.000+00:00", valori)]
+    )
+    ore = _ore_locali(campioni)
+
+    assert len(campioni) == 92
+    assert sum(kwh for _, kwh in campioni) == 8.0 + 168.0
+    assert ore[7] == "29 01:45 CET"
+    assert ore[8] == "29 03:00 CEST"
+    assert campioni[8][1] == 2.0
+    assert ore[-1] == "29 23:45 CEST"
+    assert len(set(ore)) == len(ore)
+
+
+def test_un_valore_nell_ora_che_non_esiste_viene_segnalato(caplog):
+    valori = [1.0] * 8 + [0.5] + [0.0] * 3 + [2.0] * 84
+    with caplog.at_level(logging.WARNING):
+        campioni = rs.estrai_campioni(
+            [_giorno("20260329", "2026-03-28T23:00:00.000+00:00", valori)]
+        )
+    assert len(campioni) == 92
+    assert "ora che non esiste" in caplog.text
+
+
+def test_giorno_lungo_di_ottobre_con_96_campioni_sull_orologio_locale():
+    """The same layout on 25/10/2026: the repeated hour gets the first of
+    the two 02:00, and the day still ends at 23:45, not an hour earlier."""
+    campioni = rs.estrai_campioni(
+        [_giorno("20261025", "2026-10-24T22:00:00.000+00:00", [1.0] * 96)]
+    )
+    ore = _ore_locali(campioni)
+
+    assert len(campioni) == 96
+    assert ore[8] == "25 02:00 CEST"
+    assert ore[12] == "25 03:00 CET"
+    assert ore[-1] == "25 23:45 CET"
 
 
 # --- Robustness ---------------------------------------------------------------
