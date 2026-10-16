@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.6
+### Fixed
+- On the day daylight saving time starts, the hourly values after 03:00 are no longer an hour
+  late and the last hour of the day is no longer lost, nor its F1/F2/F3 split
+  ([#10](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues/10)). To fix the
+  data already imported, run **Fetch history** again over March 29-30, 2026, and March 30-31,
+  2025 if your history goes that far back.
+
 ## 0.8.5
 ### Fixed
 - A history fetch no longer discards the whole period when its first day has no data, for
