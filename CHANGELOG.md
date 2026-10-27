@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.7
+### Fixed
+- With several PODs, an error on one of them no longer stops the daily update of the others
+  ([#11](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues/11)).
+
+### Changed
+- A day without data is retried for two weeks instead of one, for meters whose curves
+  E-Distribuzione publishes several days late.
+- The diagnostics show, for each POD, the last automatic request: when, which days and how many
+  came back for each direction.
+
 ## 0.8.6
 ### Fixed
 - On the day daylight saving time starts, the hourly values after 03:00 are no longer an hour
