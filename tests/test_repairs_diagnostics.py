@@ -64,6 +64,9 @@ async def test_diagnostica_senza_token_e_con_i_pod_anonimizzati(hass, make_edist
     )
     coordinator.ultimo_errore_accesso = f"AppBloccata: app_blocked ({POD_A})"
     coordinator.riepilogo = {POD_A: {"ultima_data_disponibile": "2026-10-12"}}
+    coordinator.ultime_richieste = {
+        POD_B: {"periodo": "2026-10-10 - 2026-10-12", "giorni_ricevuti": {"A1": 0, "A2": 0}}
+    }
     hass.data[DOMAIN] = {coordinator.entry.entry_id: coordinator}
 
     with patch(
@@ -81,3 +84,6 @@ async def test_diagnostica_senza_token_e_con_i_pod_anonimizzati(hass, make_edist
     assert dati["accesso"]["access_token_salvato"] is True
     assert dati["accesso"]["ultimo_errore"] == "AppBloccata: app_blocked (POD_1)"
     assert dati["coordinator"]["riepilogo"] == {"POD_1": {"ultima_data_disponibile": "2026-10-12"}}
+    assert dati["coordinator"]["ultime_richieste"] == {
+        "POD_2": {"periodo": "2026-10-10 - 2026-10-12", "giorni_ricevuti": {"A1": 0, "A2": 0}}
+    }

@@ -190,6 +190,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         self.ultimo_rinnovo: str | None = None
         # What the diagnostic sensors show, per POD (see async_aggiorna_riepilogo).
         self.riepilogo: dict[str, dict] = {}
+        # Last automatic request of each POD and how it went, for the
+        # diagnostics: since the last restart, like ultimo_rinnovo.
+        self.ultime_richieste: dict[str, dict] = {}
         session = async_get_clientsession(hass)
         self._auth = AuthClient(session)
         self._api = ApiClient(session, access_token="")
@@ -668,9 +671,37 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
     # Automatic polling cycle
     # ------------------------------------------------------------------
 
+    def _registra_richiesta(
+        self,
+        pod: str,
+        data_da: date,
+        data_a: date,
+        *,
+        risultati: dict[str, dict] | None = None,
+        errore: str | None = None,
+    ) -> None:
+        """Remember the last automatic request of a POD for the diagnostics:
+        when, which days, and how many came back per direction, or the error."""
+        richiesta: dict = {
+            "quando": dt_util.now().isoformat(timespec="seconds"),
+            "periodo": f"{data_da} - {data_a}",
+        }
+        if errore is not None:
+            richiesta["errore"] = errore
+        else:
+            richiesta["giorni_ricevuti"] = {
+                magnitude: len((risultati or {}).get(magnitude, {}).get("giorni_ricevuti", ()))
+                for magnitude in MAGNITUDE_TUTTE
+            }
+        self.ultime_richieste[pod] = richiesta
+
     async def _async_update_data(self) -> dict:
         await self._async_ensure_token()
 
+        # An error on one POD does not stop the others: it is raised after
+        # all of them, otherwise a POD that keeps failing would leave the
+        # ones after it in the list without data.
+        errori: dict[str, str] = {}
         for pod in self.pods:
             richiesta = await self._prossima_richiesta(pod)
 
@@ -679,18 +710,21 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 try:
                     risultati = await self._async_importa_periodo(pod, data_da, data_a)
                 except ApiError as err:
+                    _LOGGER.warning(
+                        "POD %s: errore recuperando il periodo %s - %s: %s",
+                        pod,
+                        data_da,
+                        data_a,
+                        err,
+                    )
                     # The requested days go into the queue instead of being
                     # lost: on the next cycle 'atteso' would already have moved.
                     for giorno in _giorni_nel_periodo(data_da, data_a):
                         self._accoda_giorno(pod, giorno)
-                    raise UpdateFailed(
-                        translation_domain=DOMAIN,
-                        translation_key="errore_import_pod",
-                        translation_placeholders={
-                            "pod": pod,
-                            "errore": _descrivi_errore_api(err, self.lingua),
-                        },
-                    ) from err
+                    errori[pod] = _descrivi_errore_api(err, self.lingua)
+                    self._registra_richiesta(pod, data_da, data_a, errore=errori[pod])
+                    continue
+                self._registra_richiesta(pod, data_da, data_a, risultati=risultati)
 
                 ricevuti_prelevata = risultati.get(MAGNITUDE_PRELEVATA, {}).get(
                     "giorni_ricevuti", set()
@@ -720,7 +754,17 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                         sorted(g.isoformat() for g in ricevuti_immessa),
                     )
 
-        return {"by_pod": await self.async_aggiorna_riepilogo()}
+        riepilogo = await self.async_aggiorna_riepilogo()
+        if errori:
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="errore_import_pod",
+                translation_placeholders={
+                    "pod": ", ".join(errori),
+                    "errore": "; ".join(dict.fromkeys(errori.values())),
+                },
+            )
+        return {"by_pod": riepilogo}
 
     # ------------------------------------------------------------------
     # Manual history fetch (edistribuzione.recupera_storico action)

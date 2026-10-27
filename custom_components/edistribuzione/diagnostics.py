@@ -82,5 +82,6 @@ async def async_get_config_entry_diagnostics(
             else None,
             "intervallo": str(coordinator.update_interval),
             "riepilogo": coordinator.riepilogo,
+            "ultime_richieste": coordinator.ultime_richieste,
         }
     return _anonimizza(diagnostica, pods)

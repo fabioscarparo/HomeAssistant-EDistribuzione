@@ -114,9 +114,10 @@ CONF_ORA_RICHIESTA = "ora_richiesta"
 
 # A day stays in the queue and is retried on later cycles, then dropped after
 # this many real days from when it was first queued (not after N attempts).
-# About a week covers publishing delays without hammering dates that will
-# never arrive.
-ABBANDONO_CODA_DOPO_GIORNI = 7
+# Two weeks: some meters have their curves published several days late
+# (issue #11), and the queued days go in the same daily request as the
+# others, so keeping them longer costs no extra request.
+ABBANDONO_CODA_DOPO_GIORNI = 14
 
 MAX_GIORNI_IN_CODA = 30
 
