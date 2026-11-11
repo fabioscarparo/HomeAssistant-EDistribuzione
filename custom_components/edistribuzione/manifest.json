@@ -7,6 +7,7 @@
     "frontend",
     "http"
   ],
+  "categories": ["energy.meters_monitoring"],
   "codeowners": ["@fabioscarparo"],
   "config_flow": true,
   "documentation": "https://github.com/fabioscarparo/HomeAssistant-EDistribuzione",
