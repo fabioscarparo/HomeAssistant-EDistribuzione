@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.8
+### Changed
+- The window that opens from the blocked-access repair notice now also says that the notice
+  goes away by itself once access is back.
+- The integration declares its Home Assistant category, Energy > Meters & monitoring.
+- Every change to the repository is checked with the HACS action and hassfest, as the default
+  HACS store requires.
+
 ## 0.8.7
 ### Fixed
 - With several PODs, an error on one of them no longer stops the daily update of the others
