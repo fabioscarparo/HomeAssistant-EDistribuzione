@@ -243,7 +243,7 @@
       "message": "Nessuna istanza E-Distribuzione configurata."
     },
     "pod_non_configurato": {
-      "message": "Il POD '{pod}' non è configurato su questa istanza. POD configurati: {pods}."
+      "message": "Il POD {pod} non è configurato su questa istanza. POD configurati: {pods}."
     },
     "date_invertite": {
       "message": "La data di inizio ({data_da}) è successiva alla data di fine ({data_a}): probabilmente le hai invertite. Usa data_da: \"{data_a}\" e data_a: \"{data_da}\"."
@@ -312,24 +312,22 @@
   "issues": {
     "accesso_bloccato": {
       "title": "E-Distribuzione blocca l'accesso automatico",
-      "description": "E-Distribuzione risponde con una verifica antibot invece di rinnovare l'accesso, quindi i consumi non si aggiornano. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano. Puoi ripristinare subito l'accesso entrando di nuovo dal browser; altrimenti l'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile. Non rimuovere l'integrazione per configurarla di nuovo.",
       "fix_flow": {
         "step": {
           "confirm": {
             "title": "Accedi di nuovo a E-Distribuzione",
-            "description": "E-Distribuzione risponde con una verifica antibot invece di rinnovare l'accesso, quindi i consumi non si aggiornano. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano.\n\nPer ripristinare subito l'accesso invia: la richiesta di accesso compare in Impostazioni > Dispositivi e servizi, dove puoi entrare dal browser. Se preferisci aspettare chiudi questa finestra: l'integrazione riprova da sola ogni ora. Non rimuovere l'integrazione per configurarla di nuovo."
+            "description": "E-Distribuzione risponde con una verifica antibot invece di rinnovare l'accesso, quindi i consumi non si aggiornano. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano.\n\nPer ripristinare subito l'accesso invia: la richiesta di accesso compare in Impostazioni > Dispositivi e servizi, dove puoi entrare dal browser. Se preferisci aspettare chiudi questa finestra: l'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile. Non rimuovere l'integrazione per configurarla di nuovo."
           }
         }
       }
     },
     "app_bloccata": {
       "title": "E-Distribuzione rifiuta l'accesso dell'integrazione",
-      "description": "E-Distribuzione risponde «app_blocked» al rinnovo dell'accesso: una sua regola di sicurezza sta rifiutando il client dell'app ufficiale che l'integrazione usa. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano. Puoi ripristinare subito l'accesso entrando di nuovo dal browser; altrimenti l'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile. Non rimuovere l'integrazione per configurarla di nuovo.",
       "fix_flow": {
         "step": {
           "confirm": {
             "title": "Accedi di nuovo a E-Distribuzione",
-            "description": "E-Distribuzione risponde «app_blocked» al rinnovo dell'accesso: una sua regola di sicurezza sta rifiutando il client dell'app ufficiale che l'integrazione usa. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano.\n\nPer ripristinare subito l'accesso invia: la richiesta di accesso compare in Impostazioni > Dispositivi e servizi, dove puoi entrare dal browser. Se preferisci aspettare chiudi questa finestra: l'integrazione riprova da sola ogni ora. Non rimuovere l'integrazione per configurarla di nuovo."
+            "description": "E-Distribuzione risponde «app_blocked» al rinnovo dell'accesso: una sua regola di sicurezza sta rifiutando il client dell'app ufficiale che l'integrazione usa. Non dipende dalla tua configurazione né dalle credenziali, e i dati già importati restano.\n\nPer ripristinare subito l'accesso invia: la richiesta di accesso compare in Impostazioni > Dispositivi e servizi, dove puoi entrare dal browser. Se preferisci aspettare chiudi questa finestra: l'integrazione riprova da sola ogni ora e questo avviso sparisce appena l'accesso torna disponibile. Non rimuovere l'integrazione per configurarla di nuovo."
           }
         }
       }

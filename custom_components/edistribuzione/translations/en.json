@@ -243,7 +243,7 @@
       "message": "No E-Distribuzione instance configured."
     },
     "pod_non_configurato": {
-      "message": "POD '{pod}' is not configured on this instance. Configured PODs: {pods}."
+      "message": "POD {pod} is not configured on this instance. Configured PODs: {pods}."
     },
     "date_invertite": {
       "message": "The start date ({data_da}) is after the end date ({data_a}): you probably swapped them. Use data_da: \"{data_a}\" and data_a: \"{data_da}\"."
@@ -312,24 +312,22 @@
   "issues": {
     "accesso_bloccato": {
       "title": "E-Distribuzione is blocking automated access",
-      "description": "E-Distribuzione answers with an anti-bot check instead of renewing access, so consumption data does not update. It does not depend on your setup or credentials, and the data already imported is kept. You can restore access right away by signing in again from the browser; otherwise the integration retries on its own every hour and this notice disappears as soon as access is available again. Do not remove the integration to set it up again.",
       "fix_flow": {
         "step": {
           "confirm": {
             "title": "Sign in to E-Distribuzione again",
-            "description": "E-Distribuzione answers with an anti-bot check instead of renewing access, so consumption data does not update. It does not depend on your setup or credentials, and the data already imported is kept.\n\nTo restore access right away, submit: the sign-in request shows in Settings > Devices & services, where you can sign in from the browser. If you prefer to wait, close this window: the integration retries on its own every hour. Do not remove the integration to set it up again."
+            "description": "E-Distribuzione answers with an anti-bot check instead of renewing access, so consumption data does not update. It does not depend on your setup or credentials, and the data already imported is kept.\n\nTo restore access right away, submit: the sign-in request shows in Settings > Devices & services, where you can sign in from the browser. If you prefer to wait, close this window: the integration retries on its own every hour and this notice disappears as soon as access is available again. Do not remove the integration to set it up again."
           }
         }
       }
     },
     "app_bloccata": {
       "title": "E-Distribuzione is refusing the integration's access",
-      "description": "E-Distribuzione answers \"app_blocked\" when access is renewed: one of its security rules is rejecting the official app's client the integration uses. It does not depend on your setup or credentials, and the data already imported is kept. You can restore access right away by signing in again from the browser; otherwise the integration retries on its own every hour and this notice disappears as soon as access is available again. Do not remove the integration to set it up again.",
       "fix_flow": {
         "step": {
           "confirm": {
             "title": "Sign in to E-Distribuzione again",
-            "description": "E-Distribuzione answers \"app_blocked\" when access is renewed: one of its security rules is rejecting the official app's client the integration uses. It does not depend on your setup or credentials, and the data already imported is kept.\n\nTo restore access right away, submit: the sign-in request shows in Settings > Devices & services, where you can sign in from the browser. If you prefer to wait, close this window: the integration retries on its own every hour. Do not remove the integration to set it up again."
+            "description": "E-Distribuzione answers \"app_blocked\" when access is renewed: one of its security rules is rejecting the official app's client the integration uses. It does not depend on your setup or credentials, and the data already imported is kept.\n\nTo restore access right away, submit: the sign-in request shows in Settings > Devices & services, where you can sign in from the browser. If you prefer to wait, close this window: the integration retries on its own every hour and this notice disappears as soon as access is available again. Do not remove the integration to set it up again."
           }
         }
       }

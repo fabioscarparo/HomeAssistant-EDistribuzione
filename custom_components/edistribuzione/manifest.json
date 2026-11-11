@@ -7,7 +7,7 @@
     "frontend",
     "http"
   ],
-  "codeowners": [],
+  "codeowners": ["@fabioscarparo"],
   "config_flow": true,
   "documentation": "https://github.com/fabioscarparo/HomeAssistant-EDistribuzione",
   "iot_class": "cloud_polling",
