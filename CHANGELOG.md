@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.9
+### Added
+- The POD card can show a fixed number of decimals, from 0 to 3, to compare a month or a year
+  with the portal's CSV files and the bill: **Decimal places** in the visual editor, `decimals`
+  in YAML ([#12](https://github.com/fabioscarparo/HomeAssistant-EDistribuzione/issues/12)).
+  Without it the digits still depend on the value.
+
+### Changed
+- In a narrow POD card a long total puts the unit on the next line instead of spilling out of
+  its column.
+
 ## 0.8.8
 ### Changed
 - The window that opens from the blocked-access repair notice now also says that the notice
