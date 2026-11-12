@@ -354,6 +354,11 @@ in the **Day** view, days in **Week** and **Month**, months in **Year**.
 Navigation is limited to the periods that have data. It follows the theme,
 light and dark mode, the language and the formats of the user profile.
 
+The values show fewer decimals as they grow: two below 10 kWh, one up to
+100 kWh, none above. To compare them with the portal's CSV files or a bill,
+set **Decimal places** in the editor (`decimals` in YAML) to a fixed number,
+up to 3.
+
 With no data yet, or with only the days imported at setup, the card says so
 and offers a **Fetch history** button (administrators only).
 
@@ -366,6 +371,7 @@ pod: it001e12345678     # optional: defaults to the first POD found
 name: Meter             # optional
 icon: mdi:transmission-tower
 period: month           # day | week | month | year
+decimals: 3             # optional: 0 to 3, by default they depend on the value
 show_injection: true
 ```
 

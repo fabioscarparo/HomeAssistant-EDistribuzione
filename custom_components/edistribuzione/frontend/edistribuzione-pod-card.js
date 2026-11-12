@@ -20,12 +20,15 @@
 
 const CARD_TYPE = "edistribuzione-pod-card";
 const EDITOR_TYPE = "edistribuzione-pod-card-editor";
-const VERSION = "0.6.0";
+const VERSION = "0.7.0";
 const SOURCE = "edistribuzione";
 const FASCE = ["f1", "f2", "f3"];
 // Keys of the injection by band (issue #7), next to the consumption ones.
 const FASCE_IMMESSA = FASCE.map((f) => `immessa_${f}`);
 const VISTE = ["day", "week", "month", "year"];
+// The decimals option (issue #12) goes up to the precision of the data:
+// E-Distribuzione sends whole Wh, so a fourth digit would always be zero.
+const MAX_DECIMALI = 3;
 const HOUR_MS = 3600000;
 const DAY_MS = 24 * HOUR_MS;
 // Below this much history the card suggests fetching it: right after setup
@@ -69,6 +72,8 @@ const STRINGS = {
     ed_name: "Nome",
     ed_icon: "Icona",
     ed_period: "Periodo iniziale",
+    ed_decimals: "Cifre decimali",
+    ed_decimals_helper: "Da 0 a 3. Se vuoto dipendono dal valore: meno cifre per i numeri più grandi.",
     ed_show_injection: "Mostra immissione",
   },
   en: {
@@ -103,6 +108,8 @@ const STRINGS = {
     ed_name: "Name",
     ed_icon: "Icon",
     ed_period: "Initial period",
+    ed_decimals: "Decimal places",
+    ed_decimals_helper: "From 0 to 3. When empty they depend on the value: fewer digits for larger numbers.",
     ed_show_injection: "Show return to grid",
   },
 };
@@ -291,6 +298,11 @@ class EdistribuzionePodCard extends HTMLElement {
   setConfig(config) {
     if (config.period && !VISTE.includes(config.period)) {
       throw new Error(`period deve essere uno tra: ${VISTE.join(", ")}`);
+    }
+    const decimali = config.decimals;
+    if (decimali !== undefined && decimali !== null
+      && !(Number.isInteger(decimali) && decimali >= 0 && decimali <= MAX_DECIMALI)) {
+      throw new Error(`decimals deve essere un numero intero da 0 a ${MAX_DECIMALI}`);
     }
     const podPrima = this._config.pod;
     this._config = { show_injection: true, ...config };
@@ -589,7 +601,9 @@ class EdistribuzionePodCard extends HTMLElement {
   _numero(v, cifre) {
     if (v === null || v === undefined || Number.isNaN(v)) return "-";
     const a = Math.abs(v);
-    const d = cifre ?? (a >= 100 ? 0 : a >= 10 ? 1 : 2);
+    // Explicit digits (the chart axis) win over the decimals option, which
+    // wins over the automatic rule: fewer digits as the value grows.
+    const d = cifre ?? this._config.decimals ?? (a >= 100 ? 0 : a >= 10 ? 1 : 2);
     return new Intl.NumberFormat(this._locale, {
       minimumFractionDigits: d, maximumFractionDigits: d,
       useGrouping: this._hass?.locale?.number_format !== "none",
@@ -728,10 +742,12 @@ class EdistribuzionePodCard extends HTMLElement {
     const prelievo = somma("totale") ?? (sommaFasce || null);
     const mostraImmessa = !!pod?.haImmessa && this._config.show_injection !== false;
     const nomeImmessa = pod?.produzione ? t("produced") : t("injected");
+    // <wbr>: in a narrow card a long value (a year with decimals: 3) puts
+    // the unit on the next line instead of spilling out of its column.
     const totale = (etichetta, colore, valore) => `
       <div class="total">
         <div class="total-label"><span class="dot" style="background:${rgbCss(colore)}"></span>${escapeHtml(etichetta)}</div>
-        <div class="total-value">${this._numero(valore)}<span class="unit">kWh</span></div>
+        <div class="total-value">${this._numero(valore)}<wbr><span class="unit">kWh</span></div>
       </div>`;
     $(".totals").innerHTML = totale(t("withdrawn"), colori.totale, prelievo)
       + (mostraImmessa ? totale(nomeImmessa, colori.immessa, somma("immessa")) : "");
@@ -1275,6 +1291,7 @@ class EdistribuzionePodCardEditor extends HTMLElement {
         name: "period",
         selector: { select: { mode: "dropdown", options: VISTE.map((v) => ({ value: v, label: t(v) })) } },
       },
+      { name: "decimals", selector: { number: { min: 0, max: MAX_DECIMALI, step: 1, mode: "box" } } },
       { name: "show_injection", selector: { boolean: {} } },
     ];
   }
@@ -1285,12 +1302,17 @@ class EdistribuzionePodCardEditor extends HTMLElement {
       this._form = document.createElement("ha-form");
       this._form.addEventListener("value-changed", (ev) => {
         const config = { ...ev.detail.value };
-        for (const k of Object.keys(config)) if (config[k] === "" || config[k] === undefined) delete config[k];
+        // An emptied field leaves the option out: for decimals that means
+        // the automatic digits again.
+        for (const k of Object.keys(config)) if (config[k] === "" || config[k] == null) delete config[k];
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
       });
       this.appendChild(this._form);
     }
-    const labels = { pod: "ed_pod", name: "ed_name", icon: "ed_icon", period: "ed_period", show_injection: "ed_show_injection" };
+    const labels = {
+      pod: "ed_pod", name: "ed_name", icon: "ed_icon", period: "ed_period", decimals: "ed_decimals",
+      show_injection: "ed_show_injection",
+    };
     this._form.hass = this._hass;
     this._form.data = {
       pod: this._pods?.[0]?.slug,
@@ -1300,6 +1322,7 @@ class EdistribuzionePodCardEditor extends HTMLElement {
     };
     this._form.schema = this._schema();
     this._form.computeLabel = (s) => traduci(this._hass, labels[s.name] || s.name);
+    this._form.computeHelper = (s) => (s.name === "decimals" ? traduci(this._hass, "ed_decimals_helper") : undefined);
   }
 }
 

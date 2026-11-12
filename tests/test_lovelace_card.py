@@ -81,3 +81,12 @@ def test_la_card_legge_l_immissione_per_fascia():
     contenuto = lovelace_card.PERCORSO_FILE.read_text(encoding="utf-8")
     for fascia in ("f1", "f2", "f3"):
         assert f"_energia_immessa_{fascia}`" in contenuto
+
+
+def test_la_card_ha_l_opzione_decimals():
+    """Issue #12: decimals (0 to 3) fixes the digits of every value the card
+    formats, the chart axis aside, and the visual editor has a field for it."""
+    contenuto = lovelace_card.PERCORSO_FILE.read_text(encoding="utf-8")
+    assert "const MAX_DECIMALI = 3;" in contenuto
+    assert "cifre ?? this._config.decimals ??" in contenuto
+    assert '{ name: "decimals", selector: { number: { min: 0, max: MAX_DECIMALI' in contenuto
