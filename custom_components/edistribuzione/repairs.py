@@ -4,8 +4,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
+from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResult
 
 from .const import DOMAIN
 
@@ -19,12 +20,12 @@ class RiaccessoRepairFlow(RepairsFlow):
         super().__init__()
         self._entry_id = entry_id
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> RepairsFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         return await self.async_step_confirm()
 
     async def async_step_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> RepairsFlowResult:
+    ) -> FlowResult:
         if user_input is None:
             return self.async_show_form(step_id="confirm")
 
