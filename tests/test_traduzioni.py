@@ -9,13 +9,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from homeassistant.helpers.translation import async_get_translations
 
-from custom_components.edistribuzione import config_flow, sensor, testi
-from custom_components.edistribuzione.const import DOMAIN, TIPO_POD_PRODUZIONE, TIPO_POD_SCAMBIO
+from custom_components.edistribuzione import config_flow, testi
+from custom_components.edistribuzione.const import DOMAIN
 
 CARTELLA = Path(__file__).parent.parent / "custom_components" / DOMAIN
 LINGUE = ("it", "en")
@@ -58,21 +57,6 @@ def test_ogni_translation_key_del_codice_esiste():
     sorgente = "\n".join(p.read_text(encoding="utf-8") for p in CARTELLA.glob("*.py"))
     usate = set(re.findall(r'translation_key="(\w+)"', sorgente))
     usate |= set(re.findall(r'_attr_translation_key = "(\w+)"', sorgente))
-    usate |= {
-        sensor.ConsumoGiornoSensor._chiave_traduzione(
-            SimpleNamespace(tipo_pod=lambda pod, r=ruolo: r), "POD", immessa
-        )
-        for ruolo in (TIPO_POD_SCAMBIO, TIPO_POD_PRODUZIONE)
-        for immessa in (False, True)
-    }
-    usate |= {
-        sensor.EnergiaMeseSensor._chiave_traduzione(
-            SimpleNamespace(tipo_pod=lambda pod, r=ruolo: r), "POD", immessa, precedente
-        )
-        for ruolo in (TIPO_POD_SCAMBIO, TIPO_POD_PRODUZIONE)
-        for immessa in (False, True)
-        for precedente in (False, True)
-    }
     usate |= {"picco_potenza_mese_corrente", "picco_potenza_mese_precedente"}
     it = _carica("it")
     definite = (
@@ -145,10 +129,11 @@ def test_lingua_supportata(lingua, attesa):
 
 
 @pytest.mark.parametrize(
-    ("lingua", "nome"), [("it", "Prelievo ultimo giorno"), ("en", "Last day consumption")]
+    ("lingua", "nome"),
+    [("it", "Picco potenza mese corrente"), ("en", "Current month peak power")],
 )
 async def test_home_assistant_carica_i_nomi_tradotti(hass, lingua, nome):
     """HA's real loader, not just the JSON: checks path and structure of the
     files as Home Assistant reads them."""
     traduzioni = await async_get_translations(hass, lingua, "entity", {DOMAIN})
-    assert traduzioni[f"component.{DOMAIN}.entity.sensor.prelievo_ultimo_giorno.name"] == nome
+    assert traduzioni[f"component.{DOMAIN}.entity.sensor.picco_potenza_mese_corrente.name"] == nome

@@ -15,7 +15,9 @@ from homeassistant.exceptions import (
     HomeAssistantError,
     ServiceValidationError,
 )
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
@@ -24,6 +26,7 @@ from homeassistant.util import dt as dt_util
 from .auth import AuthClient
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_ENERGIA_REATTIVA,
     CONF_INSTANCE_URL,
     CONF_PODS,
     CONF_REFRESH_TOKEN,
@@ -43,7 +46,12 @@ _LOGGER = logging.getLogger(__name__)
 
 type EdistribuzioneConfigEntry = ConfigEntry[EdistribuzioneCoordinator]
 
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+_UNIQUE_ID_RIMOSSI = ("_consumo_giorno_", "_energia_mese_")
+_SUFFISSI_REATTIVA = ("_energia_reattiva_mese", "_fattore_potenza_mese")
 
 SERVICE_RECUPERA_STORICO = "recupera_storico"
 SERVICE_CONFIGURA_ENERGY_DASHBOARD = "configura_energy_dashboard"
@@ -286,8 +294,24 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         await auth.async_revoke_token(token)
 
 
+def _pulisci_entita_rimosse(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove entity registry entries for dropped energy or disabled opt-in sensors."""
+    ent_reg = er.async_get(hass)
+    reattiva_attiva = bool(entry.options.get(CONF_ENERGIA_REATTIVA, False))
+    for entita in list(er.async_entries_for_config_entry(ent_reg, entry.entry_id)):
+        if entita.domain != Platform.SENSOR:
+            continue
+        uid = entita.unique_id or ""
+        rimuovi = any(marker in uid for marker in _UNIQUE_ID_RIMOSSI) or (
+            not reattiva_attiva and uid.endswith(_SUFFISSI_REATTIVA)
+        )
+        if rimuovi:
+            ent_reg.async_remove(entita.entity_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: EdistribuzioneConfigEntry) -> bool:
     """Set up the integration from a config entry."""
+    _pulisci_entita_rimosse(hass, entry)
     coordinator = EdistribuzioneCoordinator(hass, entry)
     entry.runtime_data = coordinator
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

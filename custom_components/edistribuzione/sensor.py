@@ -1,10 +1,10 @@
 """E-Distribuzione sensors.
 
 The long-term hourly series live in external statistics (statistics.py).
-Per-POD sensors expose supply metadata, daily/monthly peak power, official
-monthly totals, latest official billing reading, and (opt-in) monthly reactive
-energy and power factor. The current ARERA time band is computed locally from
-the calendar (fasce.py), with no request to E-Distribuzione.
+Per-POD sensors expose supply metadata, daily/monthly peak power, latest
+official billing reading, and (opt-in) monthly reactive energy and power
+factor. The current ARERA time band is computed locally from the calendar
+(fasce.py), with no request to E-Distribuzione.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfPower
+from homeassistant.const import UnitOfPower
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
@@ -85,17 +85,11 @@ def build_entities(hass, coordinator: EdistribuzioneCoordinator) -> list[SensorE
     for pod in coordinator.pods:
         entities.extend([
             UltimaDataDisponibileSensor(coordinator, entry, pod, id_padre),
-            ConsumoGiornoSensor(coordinator, entry, pod, id_padre, immessa=False),
-            ConsumoGiornoSensor(coordinator, entry, pod, id_padre, immessa=True),
             PotenzaContrattualeSensor(coordinator, entry, pod, id_padre),
             PotenzaDisponibileSensor(coordinator, entry, pod, id_padre),
             PiccoPotenzaGiornoSensor(coordinator, entry, pod, id_padre),
             PiccoPotenzaMeseSensor(coordinator, entry, pod, id_padre, precedente=False),
             PiccoPotenzaMeseSensor(coordinator, entry, pod, id_padre, precedente=True),
-            EnergiaMeseSensor(coordinator, entry, pod, id_padre, immessa=False, precedente=False),
-            EnergiaMeseSensor(coordinator, entry, pod, id_padre, immessa=True, precedente=False),
-            EnergiaMeseSensor(coordinator, entry, pod, id_padre, immessa=False, precedente=True),
-            EnergiaMeseSensor(coordinator, entry, pod, id_padre, immessa=True, precedente=True),
             UltimaLetturaUfficialeSensor(coordinator, entry, pod, id_padre),
         ])
         if reattiva_attiva:
@@ -170,7 +164,6 @@ class _SensoreRiepilogo(CoordinatorEntity[EdistribuzioneCoordinator], SensorEnti
     """Base POD sensor backed by coordinator caches, always available offline."""
 
     _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -210,6 +203,7 @@ class UltimaDataDisponibileSensor(_SensoreRiepilogo):
     """Most recent date with imported external statistics for a POD."""
 
     _attr_translation_key = "ultima_data_disponibile"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DATE
     _attr_icon = "mdi:calendar-check"
 
@@ -227,47 +221,6 @@ class UltimaDataDisponibileSensor(_SensoreRiepilogo):
     def native_value(self) -> date | None:
         valore = self._riepilogo.get("ultima_data_disponibile")
         return date.fromisoformat(valore) if valore else None
-
-
-class ConsumoGiornoSensor(_SensoreRiepilogo):
-    """Energy (kWh) of the last imported day for one direction of a POD."""
-
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_icon = "mdi:lightning-bolt"
-
-    def __init__(
-        self,
-        coordinator: EdistribuzioneCoordinator,
-        entry: ConfigEntry,
-        pod: str,
-        id_padre: str | None = None,
-        *,
-        immessa: bool = False,
-    ) -> None:
-        super().__init__(coordinator, entry, pod, id_padre)
-        self._direzione = MAGNITUDE_IMMESSA if immessa else MAGNITUDE_PRELEVATA
-        chiave_unique = "immessa" if immessa else "prelevata"
-        self._attr_unique_id = f"{entry.entry_id}_{pod}_consumo_giorno_{chiave_unique}"
-        self._attr_translation_key = self._chiave_traduzione(coordinator, pod, immessa)
-
-    @staticmethod
-    def _chiave_traduzione(coordinator: EdistribuzioneCoordinator, pod: str, immessa: bool) -> str:
-        """Translation key based on the user-assigned POD role."""
-        if coordinator.tipo_pod(pod) == TIPO_POD_PRODUZIONE:
-            return "produzione_ultimo_giorno" if immessa else "prelievo_tecnico_ultimo_giorno"
-        return "immissione_ultimo_giorno" if immessa else "prelievo_ultimo_giorno"
-
-    @property
-    def _ultimo_giorno(self) -> dict:
-        return (self._riepilogo.get("ultimo_giorno") or {}).get(self._direzione) or {}
-
-    @property
-    def native_value(self) -> float | None:
-        return self._ultimo_giorno.get("kwh")
-
-    @property
-    def extra_state_attributes(self):
-        return {"giorno": self._ultimo_giorno.get("giorno")}
 
 
 class PotenzaContrattualeSensor(_SensoreRiepilogo):
@@ -393,7 +346,6 @@ class PiccoPotenzaMeseSensor(_SensoreRiepilogo):
     ) -> None:
         super().__init__(coordinator, entry, pod, id_padre)
         self._precedente = precedente
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC if precedente else None
         suffisso = "precedente" if precedente else "corrente"
         self._attr_unique_id = f"{entry.entry_id}_{pod}_picco_potenza_mese_{suffisso}"
         self._attr_translation_key = f"picco_potenza_mese_{suffisso}"
@@ -424,71 +376,11 @@ class PiccoPotenzaMeseSensor(_SensoreRiepilogo):
         }
 
 
-class EnergiaMeseSensor(_SensoreRiepilogo):
-    """Official monthly energy total (kWh) with F1/F2/F3 breakdown from querymonthlytimeofuse."""
-
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-    _attr_suggested_display_precision = 3
-
-    def __init__(
-        self,
-        coordinator: EdistribuzioneCoordinator,
-        entry: ConfigEntry,
-        pod: str,
-        id_padre: str | None = None,
-        *,
-        immessa: bool = False,
-        precedente: bool = False,
-    ) -> None:
-        super().__init__(coordinator, entry, pod, id_padre)
-        self._direzione = MAGNITUDE_IMMESSA if immessa else MAGNITUDE_PRELEVATA
-        self._precedente = precedente
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC if precedente else None
-        self._attr_icon = (
-            "mdi:transmission-tower-export" if immessa else "mdi:transmission-tower-import"
-        )
-        periodo = "precedente" if precedente else "corrente"
-        dir_chiave = "immessa" if immessa else "prelevata"
-        self._attr_unique_id = f"{entry.entry_id}_{pod}_energia_mese_{periodo}_{dir_chiave}"
-        self._attr_translation_key = self._chiave_traduzione(coordinator, pod, immessa, precedente)
-
-    @staticmethod
-    def _chiave_traduzione(
-        coordinator: EdistribuzioneCoordinator, pod: str, immessa: bool, precedente: bool
-    ) -> str:
-        periodo = "mese_precedente" if precedente else "mese_corrente"
-        if coordinator.tipo_pod(pod) == TIPO_POD_PRODUZIONE:
-            base = "produzione" if immessa else "prelievo_tecnico"
-        else:
-            base = "immissione" if immessa else "prelievo"
-        return f"{base}_{periodo}"
-
-    @property
-    def _blocco(self) -> dict[str, Any]:
-        mensili_pod = (getattr(self.coordinator, "mensili", None) or {}).get(self._pod) or {}
-        per_dir = mensili_pod.get(self._direzione) or {}
-        chiave = "mese_precedente" if self._precedente else "mese_corrente"
-        return per_dir.get(chiave) or {}
-
-    @property
-    def native_value(self) -> float | None:
-        return self._blocco.get("totale")
-
-    @property
-    def extra_state_attributes(self):
-        b = self._blocco
-        return {
-            "mese": b.get("mese"),
-            "f1": b.get("f1"),
-            "f2": b.get("f2"),
-            "f3": b.get("f3"),
-        }
-
-
 class UltimaLetturaUfficialeSensor(_SensoreRiepilogo):
     """Latest official billing reading date with EA/ER registers and POT peaks."""
 
     _attr_translation_key = "ultima_lettura_ufficiale"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DATE
     _attr_icon = "mdi:file-document-check-outline"
 

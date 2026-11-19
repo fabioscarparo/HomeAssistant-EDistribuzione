@@ -25,9 +25,8 @@ Dashboard.
 - **F1 / F2 / F3 time bands** for both directions, with the ARERA holiday
   calendar.
 - **Peak power, supply metadata & official readings**: contractual/available
-  power, daily & monthly 15-minute peak power (kW), current/previous month
-  official totals, latest monthly billing reading, and opt-in reactive energy
-  and power factor (`cos phi`).
+  power, daily & monthly 15-minute peak power (kW), latest monthly billing
+  reading, and opt-in reactive energy and power factor (`cos phi`).
 - **Energy Dashboard** set up with a single action.
 - **POD card** with day, week, month and year views.
 - **Current time band** sensor and **Access problem** diagnostic binary sensor
@@ -233,22 +232,21 @@ E-Distribuzione publishes data with a **one-day delay**. Every day from
 last **3 days** so that later corrections are imported automatically. You
 can change the hour in **Configure → Request time**.
 
-The sensors of each POD device expose the most recent imported day, supply
-metadata, monthly summaries, peak power and official readings:
+The sensors of each POD device expose supply metadata, 15-minute peak power
+and diagnostic dates:
 
-| Category | Entities per POD |
+| Section | Entities per POD |
 |---|---|
-| Daily summary (local SQLite) | Last available date, Last day consumption/injection (or production), Last day peak power (kW, with peak time) |
-| Monthly official (`querymonthlytimeofuse`) | Current/previous month consumption & injection (or production, with F1/F2/F3 attributes), Current/previous month peak power (kW, with per-band peaks & % of contractual/available power) |
-| Supply metadata (`getSupplies`) | Contractual power (kW, with voltage level, status, point type, plant regime), Available power (kW) |
-| Official reading (`/reading`) | Latest official reading date (with flow type, reading type, `EA`/`ER` registers and `POT` peaks) |
-| Opt-in reactive (Configure menu) | Current month reactive energy (`kvarh`, `R1`-`R4`), Current month power factor (`cos phi`, `tan phi`) |
+| Sensors (power) | Contractual power (kW, with voltage level, status, point type, plant regime), Available power (kW), Last day peak power (kW, with peak time), Current month peak power (kW, with F1/F2/F3 peaks & % of contractual/available power), Previous month peak power (kW) |
+| Sensors (opt-in reactive, Configure menu) | Current month reactive energy (`kvarh`, `R1`-`R4`), Current month power factor (`cos phi`, `tan phi`) |
+| Diagnostic | Last available date, Latest official reading date (with flow type, reading type, `EA`/`ER` registers and `POT` peaks) |
 
 Values stay available after a restart and while E-Distribuzione cannot be
-reached. A direction the meter never measured, such as the return to grid
-without solar panels, shows 0 kWh. On the parent **E-Distribuzione** account
-device, an **Access problem** diagnostic binary sensor also turns on when
-automated token refresh is blocked.
+reached. Day, week, month and year energy totals (including F1/F2/F3 bands)
+are served by the external statistics in the Energy Dashboard and the POD
+card. On the parent **E-Distribuzione** account device, **Current time band**
+is exposed as a primary sensor while **Configured PODs** and **Access
+problem** are under Diagnostic.
 
 ## Energy Dashboard
 

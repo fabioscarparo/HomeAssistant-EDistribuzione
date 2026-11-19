@@ -610,8 +610,8 @@ async def test_new_sensors_values_and_opt_in_reactive_count(hass):
     )
 
     entities = sensor.build_entities(hass, coord)
-    # 2 account + 15 per POD when reactive opt-in is enabled.
-    assert len(entities) == 17
+    # 2 account + 9 per POD when reactive opt-in is enabled.
+    assert len(entities) == 11
     by_key = {e.translation_key: e for e in entities}
 
     assert by_key["potenza_contrattuale"].native_value == 4.5
@@ -622,12 +622,66 @@ async def test_new_sensors_values_and_opt_in_reactive_count(hass):
     assert by_key["picco_potenza_ultimo_giorno"].extra_state_attributes["pct_potenza_contrattuale"] == 100.0
     assert by_key["picco_potenza_mese_corrente"].native_value == 5.864
     assert by_key["picco_potenza_mese_corrente"].extra_state_attributes["pct_potenza_disponibile"] == 88.8
-    assert by_key["prelievo_mese_corrente"].native_value == 366.794
-    assert by_key["immissione_mese_precedente"].native_value == 81.075
+    assert by_key["picco_potenza_mese_precedente"].native_value == 4.068
     assert by_key["ultima_lettura_ufficiale"].native_value == date(2026, 10, 1)
     assert by_key["ultima_lettura_ufficiale"].extra_state_attributes["tipo_flusso"] == "PDO2G_R"
     assert by_key["energia_reattiva_mese_corrente"].native_value == 33.0
     assert by_key["fattore_potenza_mese_corrente"].native_value == 0.95
+
+
+async def test_cleanup_removes_dropped_energy_and_disabled_reactive_entities(hass):
+    from homeassistant.helpers import entity_registry as er
+
+    from custom_components.edistribuzione import _pulisci_entita_rimosse
+
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_PODS: [POD_A]}, options={})
+    entry.add_to_hass(hass)
+    ent_reg = er.async_get(hass)
+
+    for suffisso in (
+        f"{POD_A}_consumo_giorno_prelevata",
+        f"{POD_A}_consumo_giorno_immessa",
+        f"{POD_A}_energia_mese_corrente_prelevata",
+        f"{POD_A}_energia_mese_precedente_immessa",
+        f"{POD_A}_energia_reattiva_mese",
+        f"{POD_A}_fattore_potenza_mese",
+        f"{POD_A}_picco_potenza_mese_corrente",
+        f"{POD_A}_ultima_data_disponibile",
+    ):
+        ent_reg.async_get_or_create(
+            "sensor", DOMAIN, f"{entry.entry_id}_{suffisso}", config_entry=entry
+        )
+
+    _pulisci_entita_rimosse(hass, entry)
+    rimasti = {
+        e.unique_id for e in er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    }
+    assert rimasti == {
+        f"{entry.entry_id}_{POD_A}_picco_potenza_mese_corrente",
+        f"{entry.entry_id}_{POD_A}_ultima_data_disponibile",
+    }
+
+    # Re-add reactive sensors with opt-in enabled: they must be preserved.
+    entry_opt = MockConfigEntry(
+        domain=DOMAIN, data={CONF_PODS: [POD_A]}, options={CONF_ENERGIA_REATTIVA: True}
+    )
+    entry_opt.add_to_hass(hass)
+    for suffisso in (
+        f"{POD_A}_consumo_giorno_prelevata",
+        f"{POD_A}_energia_reattiva_mese",
+        f"{POD_A}_fattore_potenza_mese",
+    ):
+        ent_reg.async_get_or_create(
+            "sensor", DOMAIN, f"{entry_opt.entry_id}_{suffisso}", config_entry=entry_opt
+        )
+    _pulisci_entita_rimosse(hass, entry_opt)
+    rimasti_opt = {
+        e.unique_id for e in er.async_entries_for_config_entry(ent_reg, entry_opt.entry_id)
+    }
+    assert rimasti_opt == {
+        f"{entry_opt.entry_id}_{POD_A}_energia_reattiva_mese",
+        f"{entry_opt.entry_id}_{POD_A}_fattore_potenza_mese",
+    }
 
 
 async def test_config_flow_auto_detects_m2_production_role(hass):

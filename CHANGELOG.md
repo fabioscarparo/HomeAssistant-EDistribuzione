@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.0-beta.2
+### Removed
+- **Breaking change**: removed the redundant energy summary sensors per POD (`Last day
+  consumption/injection/production` from `0.8.9` and `Current/previous month
+  consumption/injection/production` from `1.0.0-beta.1`), as day/week/month/year energy and
+  F1/F2/F3 totals are already exposed via external statistics, the POD card and the Energy
+  Dashboard. Obsolete entity registry entries are removed automatically on startup (as well as
+  opt-in reactive sensors when disabled).
+
+### Changed
+- **POD entity categories**: only **Last available date** and **Latest official reading** remain
+  under **Diagnostic**; **Contractual power**, **Available power**, **Last day peak power**,
+  **Current month peak power**, **Previous month peak power**, and the opt-in reactive sensors are
+  now primary **Sensors**.
+
+### Fixed
+- Added `CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)` to silence the Hassfest
+  schema warning, and updated GitHub Actions CI to `actions/setup-python@v6`.
+
 ## 1.0.0-beta.1
 ### Added
 - **Supply metadata & automatic M1/M2 detection**: reads technical supply details from

@@ -1,7 +1,4 @@
-"""Sensors: the diagnostic ones read coordinator.riepilogo, shaped as
-{pod: {"ultima_data_disponibile": ..., "ultimo_giorno": {direzione: ...}}};
-the current time band is computed from the calendar.
-"""
+"""Sensors: per-POD sensors read coordinator caches; current time band uses calendar."""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -10,15 +7,11 @@ from unittest.mock import Mock
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.helpers.entity import EntityCategory
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.edistribuzione import sensor as s
-from custom_components.edistribuzione.const import (
-    DOMAIN,
-    MAGNITUDE_IMMESSA,
-    MAGNITUDE_PRELEVATA,
-    TIPO_POD_DEFAULT,
-)
+from custom_components.edistribuzione.const import DOMAIN, TIPO_POD_DEFAULT
 from custom_components.edistribuzione.fasce import FUSO_ITALIA
 
 POD = "IT001E00000009"
@@ -42,10 +35,6 @@ def _coord(riepilogo=None, pods=(POD,), tipo_pod=TIPO_POD_DEFAULT, lingua="it"):
     )
 
 
-def _ultimo_giorno(prelevata=None, immessa=None):
-    return {MAGNITUDE_PRELEVATA: prelevata, MAGNITUDE_IMMESSA: immessa}
-
-
 def test_pod_configurati():
     sensore = s.PodConfiguratiSensor(_coord(pods=[POD, "IT002"]), _entry())
     assert sensore.native_value == 2
@@ -63,50 +52,14 @@ def test_ultima_data_disponibile_senza_dati():
     assert sensore.native_value is None
 
 
-def test_consumo_giorno_legge_valore_e_giorno_della_direzione():
-    coord = _coord({
-        POD: {
-            "ultimo_giorno": _ultimo_giorno(
-                prelevata={"giorno": "2026-09-02", "kwh": 1.235},
-                immessa={"giorno": "2026-09-01", "kwh": 9.876},
-            )
-        }
-    })
-    prelevata = s.ConsumoGiornoSensor(coord, _entry(), POD, immessa=False)
-    immessa = s.ConsumoGiornoSensor(coord, _entry(), POD, immessa=True)
-    assert prelevata.native_value == 1.235
-    assert prelevata.extra_state_attributes["giorno"] == "2026-09-02"
-    assert immessa.native_value == 9.876
-    assert immessa.extra_state_attributes["giorno"] == "2026-09-01"
-
-
-def test_consumo_giorno_senza_dati_resta_sconosciuto():
-    sensore = s.ConsumoGiornoSensor(_coord(), _entry(), POD, immessa=False)
-    assert sensore.native_value is None
-    assert sensore.extra_state_attributes["giorno"] is None
-
-
-def test_sensori_diagnostici_disponibili_anche_se_l_aggiornamento_fallisce():
+def test_sensori_pod_disponibili_anche_se_l_aggiornamento_fallisce():
     """The values come from data already imported: they stay valid while
     E-Distribuzione does not answer (last_update_success False)."""
     coord = _coord({POD: {"ultima_data_disponibile": "2026-09-03"}})
     assert s.UltimaDataDisponibileSensor(coord, _entry(), POD).available
-    assert s.ConsumoGiornoSensor(coord, _entry(), POD).available
-
-
-@pytest.mark.parametrize(
-    ("tipo_pod", "immessa", "chiave"),
-    [
-        ("scambio", False, "prelievo_ultimo_giorno"),
-        ("scambio", True, "immissione_ultimo_giorno"),
-        ("produzione", False, "prelievo_tecnico_ultimo_giorno"),
-        ("produzione", True, "produzione_ultimo_giorno"),
-    ],
-)
-def test_consumo_giorno_nome_dipende_dal_ruolo(tipo_pod, immessa, chiave):
-    sensore = s.ConsumoGiornoSensor(_coord(tipo_pod=tipo_pod), _entry(), POD, immessa=immessa)
-    assert sensore.translation_key == chiave
-    assert sensore._attr_has_entity_name
+    assert s.UltimaLetturaUfficialeSensor(coord, _entry(), POD).available
+    assert s.PotenzaContrattualeSensor(coord, _entry(), POD).available
+    assert s.PiccoPotenzaGiornoSensor(coord, _entry(), POD).available
 
 
 @pytest.mark.parametrize(
@@ -119,7 +72,7 @@ def test_modello_dispositivo_segue_la_lingua_del_server(lingua, account, pod):
     assert s.UltimaDataDisponibileSensor(coord, _entry(), POD).device_info["model"] == pod
 
 
-async def test_build_entities_conta_account_piu_tredici_per_pod(hass):
+async def test_build_entities_conta_account_piu_sette_per_pod(hass):
     entry = _entry(hass, pods=[POD, "IT002"])
     coord = SimpleNamespace(
         data=None,
@@ -130,9 +83,41 @@ async def test_build_entities_conta_account_piu_tredici_per_pod(hass):
         energia_reattiva_attiva=False,
     )
     entità = s.build_entities(hass, coord)
-    # 2 on the account + 13 per POD (reactive opt-in disabled by default)
-    assert len(entità) == 2 + 13 * 2
+    # 2 on the account + 7 per POD (reactive opt-in disabled by default)
+    assert len(entità) == 2 + 7 * 2
     assert {"PodConfiguratiSensor", "FasciaCorrenteSensor"} <= {type(e).__name__ for e in entità}
+
+
+async def test_categorie_entita_solo_date_diagnostiche_sui_pod(hass):
+    entry = _entry(hass, pods=[POD])
+    coord = SimpleNamespace(
+        data=None,
+        pods=[POD],
+        entry=entry,
+        tipo_pod=lambda pod: TIPO_POD_DEFAULT,
+        lingua="it",
+        energia_reattiva_attiva=True,
+    )
+    by_key = {e.translation_key: e for e in s.build_entities(hass, coord)}
+    diagnostiche = {
+        k for k, ent in by_key.items() if ent.entity_category == EntityCategory.DIAGNOSTIC
+    }
+    primarie = {k for k, ent in by_key.items() if ent.entity_category is None}
+    assert diagnostiche == {
+        "pod_configurati",
+        "ultima_data_disponibile",
+        "ultima_lettura_ufficiale",
+    }
+    assert primarie == {
+        "fascia_corrente",
+        "potenza_contrattuale",
+        "potenza_disponibile",
+        "picco_potenza_ultimo_giorno",
+        "picco_potenza_mese_corrente",
+        "picco_potenza_mese_precedente",
+        "energia_reattiva_mese_corrente",
+        "fattore_potenza_mese_corrente",
+    }
 
 
 async def test_fascia_corrente_cambia_al_confine_senza_polling(
