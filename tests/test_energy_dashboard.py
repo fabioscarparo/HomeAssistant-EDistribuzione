@@ -25,6 +25,28 @@ class _CoordinatorFinto:
         return self._ruoli.get(pod, TIPO_POD_SCAMBIO)
 
 
+def _grid_stats(sorgenti: list[dict]) -> tuple[set[str], set[str]]:
+    """Collect grid consumption and return statistic_ids across legacy and unified HA schemas."""
+    da: set[str] = set()
+    verso: set[str] = set()
+    for s in sorgenti:
+        if s.get("type") != "grid":
+            continue
+        if "flow_from" in s or "flow_to" in s:
+            for item in s.get("flow_from") or ():
+                if item.get("stat_energy_from"):
+                    da.add(item["stat_energy_from"])
+            for item in s.get("flow_to") or ():
+                if item.get("stat_energy_to"):
+                    verso.add(item["stat_energy_to"])
+        else:
+            if s.get("stat_energy_from"):
+                da.add(s["stat_energy_from"])
+            if s.get("stat_energy_to"):
+                verso.add(s["stat_energy_to"])
+    return da, verso
+
+
 async def test_aggiunge_grid_per_scambio_e_solar_per_produzione(hass):
     coordinator = _CoordinatorFinto(
         ["IT001", "ITP0A"], {"IT001": TIPO_POD_SCAMBIO, "ITP0A": TIPO_POD_PRODUZIONE}
@@ -37,9 +59,9 @@ async def test_aggiunge_grid_per_scambio_e_solar_per_produzione(hass):
     sorgenti = manager.data["energy_sources"]
     assert {s["type"] for s in sorgenti} == {"grid", "solar"}
 
-    grid = next(s for s in sorgenti if s["type"] == "grid")
-    assert grid["stat_energy_from"] == "edistribuzione:it001_energia"
-    assert grid["stat_energy_to"] == "edistribuzione:it001_energia_immessa"
+    da, verso = _grid_stats(sorgenti)
+    assert da == {"edistribuzione:it001_energia"}
+    assert verso == {"edistribuzione:it001_energia_immessa"}
 
     solar = next(s for s in sorgenti if s["type"] == "solar")
     assert solar["stat_energy_from"] == "edistribuzione:itp0a_energia_immessa"
@@ -115,4 +137,6 @@ async def test_piu_pod_sullo_stesso_coordinator(hass):
 
     assert len(aggiunte) == 2
     manager = await async_get_manager(hass)
-    assert len(manager.data["energy_sources"]) == 2
+    da, verso = _grid_stats(manager.data["energy_sources"])
+    assert da == {"edistribuzione:it001_energia", "edistribuzione:it002_energia"}
+    assert verso == {"edistribuzione:it001_energia_immessa", "edistribuzione:it002_energia_immessa"}
