@@ -1,7 +1,4 @@
-"""edistribuzione integration: E-Distribuzione login, consumption/injection
-load curves per POD, imported as external statistics into Home Assistant's
-Energy Dashboard.
-"""
+"""edistribuzione integration: E-Distribuzione login, load curves and statistics."""
 from __future__ import annotations
 
 import contextlib
@@ -11,7 +8,7 @@ from datetime import date, datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import (
     ConfigEntryAuthFailed,
     ConfigEntryNotReady,
@@ -20,33 +17,43 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, ISSUE_ACCESSO_BLOCCATO, ISSUE_APP_BLOCCATA, RITARDO_DATI_GIORNI
+from .auth import AuthClient
+from .const import (
+    CONF_ACCESS_TOKEN,
+    CONF_INSTANCE_URL,
+    CONF_PODS,
+    CONF_REFRESH_TOKEN,
+    DOMAIN,
+    ISSUE_ACCESSO_BLOCCATO,
+    ISSUE_APP_BLOCCATA,
+    RITARDO_DATI_GIORNI,
+    issue_id_per_entry,
+)
 from .coordinator import EdistribuzioneCoordinator
 from .energy_dashboard import async_configura_energy_dashboard
+from .fasce import FUSO_ITALIA
 from .lovelace_card import async_registra_card
+from .redaction import mask_pods_in_text
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+type EdistribuzioneConfigEntry = ConfigEntry[EdistribuzioneCoordinator]
+
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 
 SERVICE_RECUPERA_STORICO = "recupera_storico"
 SERVICE_CONFIGURA_ENERGY_DASHBOARD = "configura_energy_dashboard"
 
 CAMPI_RECUPERA_STORICO = ("device_id", "data_da", "data_a")
 
-# A date typed WITHOUT quotes in the YAML editor of Developer tools reaches us
-# as a full timestamp: the frontend reads it as a YAML date and sends it as
-# "2026-08-01T00:00:00.000Z". The day the user wrote is the part before the
-# time, taken as is with no time zone conversion. Up to v0.6.0 the action
-# rejected it with "Invalid date specified" and nothing more.
 _RE_DATA_ISO = re.compile(
     r"(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?"
     r"(?:Z|[+-]\d{2}:?\d{2})?)?"
 )
-# Day/month/year, as dates are written in Italy: not accepted (01/08 is
-# ambiguous), only suggested in the error in the right format.
 _RE_DATA_GIORNO_MESE_ANNO = re.compile(r"(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})")
 _RE_CODICE_POD = re.compile(r"IT\d{3}E\w{5,}", re.IGNORECASE)
 _RE_ENTITY_ID = re.compile(r"[a-z_]+\.[a-z0-9_]+")
@@ -60,9 +67,16 @@ def _errore(chiave: str, **segnaposto: str) -> ServiceValidationError:
     )
 
 
+def _coordinatori_attivi(hass: HomeAssistant) -> list[tuple[str, EdistribuzioneCoordinator]]:
+    return [
+        (entry_id, c)
+        for entry_id, c in hass.data.get(DOMAIN, {}).items()
+        if isinstance(c, EdistribuzioneCoordinator)
+    ]
+
+
 def _leggi_data(valore, campo: str) -> date:
-    """Date of the 'data_da'/'data_a' field, or an error that says how to
-    write it."""
+    """Parse data_da/data_a or raise a translated ServiceValidationError."""
     if isinstance(valore, datetime):
         return valore.date()
     if isinstance(valore, date):
@@ -75,9 +89,9 @@ def _leggi_data(valore, campo: str) -> date:
         try:
             return date(*(int(parte) for parte in corrispondenza.groups()))
         except ValueError:
-            pass  # e.g. 2026-02-30: an invalid day, reported below
+            pass
 
-    esempio = dt_util.now().date() - timedelta(days=RITARDO_DATI_GIORNI)
+    esempio = dt_util.now(FUSO_ITALIA).date() - timedelta(days=RITARDO_DATI_GIORNI)
     if corrispondenza := _RE_DATA_GIORNO_MESE_ANNO.fullmatch(testo):
         giorno, mese, anno = (int(parte) for parte in corrispondenza.groups())
         with contextlib.suppress(ValueError):
@@ -85,13 +99,9 @@ def _leggi_data(valore, campo: str) -> date:
     raise _errore(f"{campo}_non_valida", valore=testo, esempio=esempio.isoformat())
 
 
-def _dispositivi_per_identificativo(hass: HomeAssistant, entry_id: str) -> dict[str, dr.DeviceEntry]:
-    """Devices of a config entry by their identifier in this domain.
-
-    Through async_entries_for_config_entry, available on every supported
-    version: async_get_device(identifiers=...) is deprecated from Home
-    Assistant 2026.10, where it can raise instead of warning.
-    """
+def _dispositivi_per_identificativo(
+    hass: HomeAssistant, entry_id: str
+) -> dict[str, dr.DeviceEntry]:
     return {
         identificativo: device
         for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry_id)
@@ -101,20 +111,19 @@ def _dispositivi_per_identificativo(hass: HomeAssistant, entry_id: str) -> dict[
 
 
 def _dispositivi_disponibili(hass: HomeAssistant) -> str:
-    """'name: device_id' of every device of the loaded setups, for the error
-    messages: whoever wrote the wrong id finds the right one right there."""
     righe = []
-    for entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
+    for entry_id, coordinator in _coordinatori_attivi(hass):
         dispositivi = _dispositivi_per_identificativo(hass, entry_id)
-        for identificativo in [entry_id] + [f"{entry_id}_{pod}" for pod in coordinator.pods]:
-            if (device := dispositivi.get(identificativo)) is not None:
-                righe.append(f"{device.name_by_user or device.name}: {device.id}")
+        righe.extend(
+            f"{device.name_by_user or device.name}: {device.id}"
+            for identificativo in [entry_id, *(f"{entry_id}_{pod}" for pod in coordinator.pods)]
+            if (device := dispositivi.get(identificativo)) is not None
+        )
     return ", ".join(righe) or "-"
 
 
 def _device_id_di_un_pod(hass: HomeAssistant, pod: str) -> str | None:
-    """device_id of the device of a configured POD (case-insensitive code)."""
-    for entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
+    for entry_id, coordinator in _coordinatori_attivi(hass):
         dispositivi = _dispositivi_per_identificativo(hass, entry_id)
         for configurato in coordinator.pods:
             if configurato.upper() == pod.upper():
@@ -127,17 +136,8 @@ def _device_id_di_un_pod(hass: HomeAssistant, pod: str) -> str | None:
 def _risolvi_coordinator_e_pod_da_device(
     hass: HomeAssistant, valore
 ) -> tuple[EdistribuzioneCoordinator, str | None]:
-    """From a device_id (chosen in the action's 'device' selector, populated
-    with the integration's real devices) resolve the coordinator and, if it is
-    a single-POD device, the specific POD. Returns pod=None for the "account"
-    device (fetch over all the entry's PODs together).
-
-    The id is often written by hand in YAML: the usual mix-ups (a POD code or
-    an entity id in its place, a device of another integration) get their own
-    message, with the list of the right ids.
-    """
+    """Resolve a device_id to (coordinator, pod_or_None)."""
     if isinstance(valore, list | tuple):
-        # device_id given as an action target arrives as a list.
         if len(valore) > 1:
             raise _errore("un_solo_dispositivo", disponibili=_dispositivi_disponibili(hass))
         valore = valore[0] if valore else None
@@ -155,7 +155,7 @@ def _risolvi_coordinator_e_pod_da_device(
                     "pod_non_configurato",
                     pod=device_id,
                     pods=", ".join(
-                        pod for c in hass.data.get(DOMAIN, {}).values() for pod in c.pods
+                        pod for _, c in _coordinatori_attivi(hass) for pod in c.pods
                     ),
                 )
             raise _errore("dispositivo_e_un_pod", valore=device_id, device_id=trovato)
@@ -167,11 +167,6 @@ def _risolvi_coordinator_e_pod_da_device(
         raise _errore(chiave, device_id=device_id, disponibili=_dispositivi_disponibili(hass))
 
     nome = device.name_by_user or device.name or device_id
-    # "Backwards" search across this integration's config entries, instead of
-    # reading device.config_entries (deprecated by the HA 2026.8/2026.9 device
-    # registry rework in favour of the new single config_entry_id/
-    # config_subentry_id): the identifiers are (DOMAIN, entry_id) for the
-    # account device and (DOMAIN, f"{entry_id}_{pod}") for each POD.
     identificativi = [ident for dominio, ident in device.identifiers if dominio == DOMAIN]
     if not identificativi:
         raise _errore(
@@ -187,11 +182,15 @@ def _risolvi_coordinator_e_pod_da_device(
         ),
         None,
     )
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id) if entry else None
+    coordinator = (
+        getattr(entry, "runtime_data", None) or hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if entry
+        else None
+    )
     if entry is None or coordinator is None or entry.state is not ConfigEntryState.LOADED:
         _LOGGER.warning(
             "Recupero storico: la configurazione del dispositivo %s non è attiva (stato %s)",
-            nome,
+            mask_pods_in_text(nome),
             entry.state if entry else None,
         )
         raise _errore("dispositivo_senza_configurazione", nome=nome)
@@ -201,8 +200,14 @@ def _risolvi_coordinator_e_pod_da_device(
     for identificativo in identificativi:
         if identificativo.startswith(prefisso):
             candidato = identificativo[len(prefisso) :]
-            if candidato in coordinator.pods:
-                pod = candidato
+            if candidato not in coordinator.pods:
+                # Never silently widen an orphaned POD device to all PODs.
+                raise _errore(
+                    "pod_non_configurato",
+                    pod=candidato,
+                    pods=", ".join(coordinator.pods),
+                )
+            pod = candidato
             break
 
     return coordinator, pod
@@ -211,9 +216,6 @@ def _risolvi_coordinator_e_pod_da_device(
 def _leggi_dati_recupero(
     hass: HomeAssistant, dati: dict
 ) -> tuple[EdistribuzioneCoordinator, str | None, date, date]:
-    """Validate the data of a recupera_storico call by hand instead of with a
-    schema: Home Assistant's errors ("extra keys not allowed", "Could not
-    parse date") name the field but not the fix, and are not translated."""
     sconosciuti = sorted(set(dati) - set(CAMPI_RECUPERA_STORICO))
     if sconosciuti:
         raise _errore("campo_sconosciuto", campi=", ".join(sconosciuti))
@@ -224,21 +226,25 @@ def _leggi_dati_recupero(
 
 
 async def _async_registra_servizi(hass: HomeAssistant) -> None:
-    """Register the integration's actions (once)."""
     if hass.services.has_service(DOMAIN, SERVICE_RECUPERA_STORICO):
         return
 
-    async def _recupera_storico(call: ServiceCall) -> None:
+    async def _recupera_storico(call: ServiceCall) -> ServiceResponse:
         coordinator, pod, data_da, data_a = _leggi_dati_recupero(hass, dict(call.data))
-        await coordinator.async_recupera_storico(data_da, data_a, pod=pod)
+        risultato = await coordinator.async_recupera_storico(data_da, data_a, pod=pod)
+        if call.return_response:
+            return risultato
+        return None
 
-    # No schema: _leggi_dati_recupero validates the fields itself.
-    hass.services.async_register(DOMAIN, SERVICE_RECUPERA_STORICO, _recupera_storico)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RECUPERA_STORICO,
+        _recupera_storico,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
     async def _configura_energy_dashboard(call: ServiceCall) -> None:
-        coordinatori = [
-            c for c in hass.data.get(DOMAIN, {}).values() if isinstance(c, EdistribuzioneCoordinator)
-        ]
+        coordinatori = [c for _, c in _coordinatori_attivi(hass)]
         if not coordinatori:
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="nessuna_istanza"
@@ -250,43 +256,59 @@ async def _async_registra_servizi(hass: HomeAssistant) -> None:
     )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up the integration from a config entry."""
-    coordinator = EdistribuzioneCoordinator(hass, entry)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register domain-level services and Lovelace card once."""
     await _async_registra_servizi(hass)
     await async_registra_card(hass)
-    # HA keeps an ignored notice hidden even when it is recreated with the same
-    # name. Clearing it here, on every start or reload, lets the first update
-    # recreate it visible if access is still blocked: ignoring it only hides it
-    # until the next reload.
-    ir.async_delete_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
-    ir.async_delete_issue(hass, DOMAIN, ISSUE_APP_BLOCCATA)
-    # Before contacting E-Distribuzione: series added by an update (or lost by
-    # the Recorder) are rebuilt from the local database, and the diagnostic
-    # sensors show the data already imported, even if the first refresh fails.
+    return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow manual removal of orphaned POD devices no longer in config_entry."""
+    entry_id = config_entry.entry_id
+    active_ids = {entry_id} | {f"{entry_id}_{pod}" for pod in config_entry.data.get(CONF_PODS, [])}
+    return not any(
+        dominio == DOMAIN and ident in active_ids for dominio, ident in device_entry.identifiers
+    )
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up per-entry Repairs issues and best-effort revoke OAuth tokens."""
+    for issue in (ISSUE_ACCESSO_BLOCCATO, ISSUE_APP_BLOCCATA):
+        ir.async_delete_issue(hass, DOMAIN, issue_id_per_entry(issue, entry.entry_id))
+
+    token = entry.data.get(CONF_REFRESH_TOKEN) or entry.data.get(CONF_ACCESS_TOKEN)
+    if token:
+        session = async_get_clientsession(hass)
+        auth = AuthClient(session, instance_url=entry.data.get(CONF_INSTANCE_URL))
+        await auth.async_revoke_token(token)
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: EdistribuzioneConfigEntry) -> bool:
+    """Set up the integration from a config entry."""
+    coordinator = EdistribuzioneCoordinator(hass, entry)
+    entry.runtime_data = coordinator
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    # Idempotent fallback when async_setup_entry is invoked directly without async_setup.
+    await _async_registra_servizi(hass)
+    await async_registra_card(hass)
+
+    # Clear this entry's notices on reload so an ignored issue reappears if still blocked.
+    for issue in (ISSUE_ACCESSO_BLOCCATO, ISSUE_APP_BLOCCATA):
+        ir.async_delete_issue(hass, DOMAIN, issue_id_per_entry(issue, entry.entry_id))
+        ir.async_delete_issue(hass, DOMAIN, issue)
+
     await coordinator.async_ricostruisci_serie_mancanti()
     await coordinator.async_aggiorna_riepilogo()
-    # async_config_entry_first_refresh RAISES ConfigEntryNotReady if the first
-    # refresh fails, and HA retries the setup later. It must run BEFORE
-    # forwarding the platforms: otherwise, on the retry, HA refuses to forward
-    # them a second time ("has already been setup") and the sensors stay absent
-    # until a restart - which happens if E-Distribuzione does not answer right
-    # while Home Assistant is starting.
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryAuthFailed:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         raise
     except ConfigEntryNotReady:
-        # With access blocked by E-Distribuzione (anti-bot check or OAuth
-        # client rejected), HA's setup retries (up to one every 10 minutes)
-        # would mean hammering exactly that block: the setup completes and the
-        # coordinator retries at its normal rate, once an hour. The Repairs
-        # notice explains why the data is stuck.
         if not coordinator.accesso_bloccato:
-            # Not left behind for a setup that did not happen: the action
-            # would otherwise find it and act on an inactive setup.
             hass.data[DOMAIN].pop(entry.entry_id, None)
             raise
         _LOGGER.warning(
@@ -297,18 +319,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: EdistribuzioneConfigEntry) -> bool:
     """Unload the config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unload_ok:
         return False
 
     hass.data[DOMAIN].pop(entry.entry_id, None)
+    for issue in (ISSUE_ACCESSO_BLOCCATO, ISSUE_APP_BLOCCATA):
+        ir.async_delete_issue(hass, DOMAIN, issue_id_per_entry(issue, entry.entry_id))
 
     if not hass.data[DOMAIN]:
         ir.async_delete_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO)
         ir.async_delete_issue(hass, DOMAIN, ISSUE_APP_BLOCCATA)
-        hass.services.async_remove(DOMAIN, SERVICE_RECUPERA_STORICO)
-        hass.services.async_remove(DOMAIN, SERVICE_CONFIGURA_ENERGY_DASHBOARD)
 
     return True

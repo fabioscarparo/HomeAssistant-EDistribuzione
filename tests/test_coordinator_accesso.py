@@ -31,6 +31,7 @@ from custom_components.edistribuzione.const import (
     DOMAIN,
     ISSUE_ACCESSO_BLOCCATO,
     ISSUE_APP_BLOCCATA,
+    issue_id_per_entry,
 )
 
 from .conftest import POD_A
@@ -79,7 +80,8 @@ async def test_il_token_salvato_non_cancella_l_avviso_di_blocco(hass, make_edist
     coordinator._segnala_blocco(ISSUE_ACCESSO_BLOCCATO)
     await coordinator._async_ensure_token()
     assert coordinator.accesso_bloccato
-    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is not None
+    issue_id = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, coordinator.entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
 
 
 async def test_una_richiesta_dati_riuscita_toglie_l_avviso(hass, make_edist_coordinator):
@@ -88,7 +90,8 @@ async def test_una_richiesta_dati_riuscita_toglie_l_avviso(hass, make_edist_coor
     coordinator._api.async_get_daily_load_profile = AsyncMock(return_value=[])
     await coordinator._async_get_daily_load_profile(POD_A, date(2026, 10, 1), date(2026, 10, 1), "A1")
     assert not coordinator.accesso_bloccato
-    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA) is None
+    issue_id = issue_id_per_entry(ISSUE_APP_BLOCCATA, coordinator.entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
 
 async def test_anche_il_403_rinnova_il_token(make_edist_coordinator):
@@ -120,7 +123,8 @@ async def test_token_salvato_scaduto_e_rinnovo_bloccato(hass, make_edist_coordin
         )
     assert errore.value.translation_key == "app_bloccata"
     assert coordinator.accesso_bloccato
-    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA).is_fixable
+    issue_id = issue_id_per_entry(ISSUE_APP_BLOCCATA, coordinator.entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id).is_fixable
     assert coordinator.entry.data[CONF_ACCESS_TOKEN] == "scaduto"
 
 
@@ -129,6 +133,7 @@ async def test_token_bloccato_avvisa_e_l_avviso_sparisce_quando_torna(
 ):
     coordinator = make_edist_coordinator()
     registro = ir.async_get(hass)
+    issue_id = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, coordinator.entry.entry_id)
 
     coordinator._auth.async_refresh_access_token = AsyncMock(
         side_effect=AccessoBloccato("antibot")
@@ -136,10 +141,9 @@ async def test_token_bloccato_avvisa_e_l_avviso_sparisce_quando_torna(
     with pytest.raises(UpdateFailed) as errore:
         await coordinator._async_ensure_token()
     assert errore.value.translation_key == "accesso_bloccato"
-    avviso = registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO)
+    avviso = registro.async_get_issue(DOMAIN, issue_id)
     assert avviso is not None
     assert avviso.translation_key == ISSUE_ACCESSO_BLOCCATO
-    # Fixable: the fix starts a new sign-in (see repairs.py).
     assert avviso.is_fixable
     assert coordinator.ultimo_errore_accesso.endswith("AccessoBloccato: antibot")
 
@@ -147,17 +151,18 @@ async def test_token_bloccato_avvisa_e_l_avviso_sparisce_quando_torna(
         return_value=SimpleNamespace(access_token="nuovo", refresh_token="rt")
     )
     await coordinator._async_ensure_token()
-    assert registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is None
+    assert registro.async_get_issue(DOMAIN, issue_id) is None
     assert coordinator.entry.data["refresh_token"] == "rt"
 
 
 async def test_client_rifiutato_avvisa_senza_chiedere_un_nuovo_login(
     hass, make_edist_coordinator
 ):
-    """Issue #4: "app_blocked" on refresh. A new login goes through the same
-    client and would be refused: dedicated notice, token kept, no reauth."""
+    """Issue #4: 'app_blocked' on refresh creates a dedicated notice without reauth."""
     coordinator = make_edist_coordinator()
     registro = ir.async_get(hass)
+    issue_app = issue_id_per_entry(ISSUE_APP_BLOCCATA, coordinator.entry.entry_id)
+    issue_acc = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, coordinator.entry.entry_id)
 
     coordinator._auth.async_refresh_access_token = AsyncMock(
         side_effect=AppBloccata("app_blocked")
@@ -166,25 +171,24 @@ async def test_client_rifiutato_avvisa_senza_chiedere_un_nuovo_login(
         await coordinator._async_ensure_token()
     assert errore.value.translation_key == "app_bloccata"
     assert coordinator.accesso_bloccato
-    assert registro.async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA) is not None
+    assert registro.async_get_issue(DOMAIN, issue_app) is not None
     assert coordinator.entry.data[CONF_REFRESH_TOKEN] == "rt"
 
-    # The block changes kind: only one notice is left, the right one.
     coordinator._auth.async_refresh_access_token = AsyncMock(
         side_effect=AccessoBloccato("antibot")
     )
     with pytest.raises(UpdateFailed):
         await coordinator._async_ensure_token()
-    assert registro.async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA) is None
-    assert registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is not None
+    assert registro.async_get_issue(DOMAIN, issue_app) is None
+    assert registro.async_get_issue(DOMAIN, issue_acc) is not None
 
     coordinator._auth.async_refresh_access_token = AsyncMock(
         return_value=SimpleNamespace(access_token="nuovo", refresh_token="rt")
     )
     await coordinator._async_ensure_token()
     assert not coordinator.accesso_bloccato
-    assert registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is None
-    assert registro.async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA) is None
+    assert registro.async_get_issue(DOMAIN, issue_acc) is None
+    assert registro.async_get_issue(DOMAIN, issue_app) is None
 
 
 async def test_token_scaduto_chiede_un_nuovo_login(hass, make_edist_coordinator):
@@ -223,13 +227,12 @@ async def _setup_con_rinnovo(hass, effetto):
 
 
 async def test_setup_bloccato_si_completa_senza_tentativi_ravvicinati(hass):
-    """With the anti-bot block at startup the setup does not go into
-    SETUP_RETRY, which would repeat the request as often as every 10 minutes:
-    it completes and the coordinator retries at its hourly rate."""
+    """With the anti-bot block at startup the setup completes and retries hourly."""
     entry, auth = await _setup_con_rinnovo(hass, AccessoBloccato("antibot"))
     assert entry.state is ConfigEntryState.LOADED
     assert auth.async_refresh_access_token.await_count == 1
-    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is not None
+    issue_id = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
     coordinator = hass.data[DOMAIN][entry.entry_id]
     assert coordinator.accesso_bloccato
     assert coordinator.update_interval.total_seconds() == 3600
@@ -239,7 +242,8 @@ async def test_client_rifiutato_all_avvio_completa_il_setup(hass):
     entry, auth = await _setup_con_rinnovo(hass, AppBloccata("app_blocked"))
     assert entry.state is ConfigEntryState.LOADED
     assert auth.async_refresh_access_token.await_count == 1
-    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_APP_BLOCCATA) is not None
+    issue_id = issue_id_per_entry(ISSUE_APP_BLOCCATA, entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
     assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
 
 
@@ -254,24 +258,24 @@ async def test_token_scaduto_all_avvio_apre_la_riautenticazione(hass):
 async def test_altri_errori_all_avvio_restano_un_nuovo_tentativo_di_setup(hass):
     entry, _ = await _setup_con_rinnovo(hass, AuthError("errore 500"))
     assert entry.state is ConfigEntryState.SETUP_RETRY
-    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is None
-    # No coordinator left behind for a setup that did not happen.
+    issue_id = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
     assert entry.entry_id not in hass.data.get(DOMAIN, {})
 
 
 async def test_avviso_ignorato_ricompare_al_ricaricamento_se_il_blocco_continua(hass):
-    """HA keeps an ignored notice hidden even when it is recreated: after a
-    reload with access still blocked it must be visible again."""
+    """After a reload with access still blocked, an ignored notice reappears."""
     entry, auth = await _setup_con_rinnovo(hass, AccessoBloccato("antibot"))
     registro = ir.async_get(hass)
-    ir.async_ignore_issue(hass, DOMAIN, ISSUE_ACCESSO_BLOCCATO, True)
-    assert registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO).dismissed_version
+    issue_id = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, entry.entry_id)
+    ir.async_ignore_issue(hass, DOMAIN, issue_id, True)
+    assert registro.async_get_issue(DOMAIN, issue_id).dismissed_version
 
     with patch("custom_components.edistribuzione.coordinator.AuthClient", return_value=auth):
         assert await hass.config_entries.async_reload(entry.entry_id)
         await hass.async_block_till_done()
 
-    avviso = registro.async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO)
+    avviso = registro.async_get_issue(DOMAIN, issue_id)
     assert avviso is not None
     assert avviso.dismissed_version is None
 
@@ -280,7 +284,8 @@ async def test_rimuovendo_l_integrazione_sparisce_anche_l_avviso(hass):
     entry, _ = await _setup_con_rinnovo(hass, AccessoBloccato("antibot"))
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_ACCESSO_BLOCCATO) is None
+    issue_id = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
 
 async def test_all_avvio_ricostruisce_le_serie_anche_con_l_accesso_bloccato(hass):

@@ -91,7 +91,7 @@ async def test_un_errore_di_lettura_non_cancella_i_valori_precedenti(
 ):
     coordinator = make_edist_coordinator(pods=[POD_A])
     coordinator.riepilogo = {POD_A: {"ultima_data_disponibile": "2026-10-11"}}
-    with patch.object(raw_storage, "kwh_ultimo_giorno", side_effect=OSError("disco")):
+    with patch.object(raw_storage, "riepilogo_db", side_effect=OSError("disco")):
         riepilogo = await coordinator.async_aggiorna_riepilogo()
     assert riepilogo[POD_A] == {"ultima_data_disponibile": "2026-10-11"}
 

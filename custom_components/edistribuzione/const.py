@@ -17,12 +17,18 @@ DOMAIN = "edistribuzione"
 # domain by itself once Enel lifts the block (see auth.AuthClient).
 SF_HOST_PRINCIPALE = "private.e-distribuzione.it"
 SF_HOST_DIRETTO = "edistribuzione.my.site.com"
+# Direct Salesforce org host (instance_url): bypasses both Imperva anti-bot on
+# private.e-distribuzione.it and Transaction Security app_blocked on my.site.com.
+SF_HOST_TOKEN = "edistribuzione.my.salesforce.com"
 SF_HOSTS = (SF_HOST_PRINCIPALE, SF_HOST_DIRETTO)
 
 SF_BASE = f"https://{SF_HOST_PRINCIPALE}/PortaleClienti"
 
 OAUTH_AUTHORIZE_URL = f"{SF_BASE}/services/oauth2/authorize"
 OAUTH_TOKEN_URL = f"{SF_BASE}/services/oauth2/token"
+OAUTH_TOKEN_URL_DIRETTO = f"https://{SF_HOST_TOKEN}/services/oauth2/token"
+OAUTH_REVOKE_URL = f"{SF_BASE}/services/oauth2/revoke"
+OAUTH_REVOKE_URL_DIRETTO = f"https://{SF_HOST_TOKEN}/services/oauth2/revoke"
 OAUTH_USERINFO_URL = f"{SF_BASE}/services/oauth2/userinfo"
 
 LOGIN_PAGE_URL = f"{SF_BASE}/s/login/"
@@ -61,10 +67,22 @@ METHOD_USER_CURVA_PERIODO = "CURVE_DI_CARICO-PERIODO"
 # These are the codes of the MuleSoft REST backend (querydailyloadprofile),
 # not those of the web portal ("A+"/"A-"): two different backends with
 # different vocabularies, linked only by the OAuth token.
-MAGNITUDE_PRELEVATA = "A1"  # energy drawn from the grid
-MAGNITUDE_IMMESSA = "A2"  # energy fed into the grid
+MAGNITUDE_PRELEVATA = "A1"  # active energy drawn from the grid (kWh)
+MAGNITUDE_IMMESSA = "A2"  # active energy fed into the grid (kWh)
+
+# IEC four-quadrant reactive energy magnitudes (kvarh), opt-in via options.
+MAGNITUDE_REATTIVA_R1 = "R1"  # reactive inductive withdrawn (Q1)
+MAGNITUDE_REATTIVA_R2 = "R2"  # reactive capacitive injected (Q2)
+MAGNITUDE_REATTIVA_R3 = "R3"  # reactive inductive injected (Q3)
+MAGNITUDE_REATTIVA_R4 = "R4"  # reactive capacitive withdrawn (Q4)
 
 MAGNITUDE_TUTTE = (MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA)
+MAGNITUDE_REATTIVE = (
+    MAGNITUDE_REATTIVA_R1,
+    MAGNITUDE_REATTIVA_R2,
+    MAGNITUDE_REATTIVA_R3,
+    MAGNITUDE_REATTIVA_R4,
+)
 
 # Directions for which the ARERA time-band series (F1/F2/F3, see fasce.py) are
 # also generated: both, as E-Distribuzione accounts consumption and injection
@@ -76,16 +94,19 @@ CONF_PODS = "pods"  # list of POD codes, all on the same authenticated account
 CONF_ACCESS_TOKEN = "access_token"
 CONF_REFRESH_TOKEN = "refresh_token"
 CONF_INSTANCE_URL = "instance_url"
+CONF_TOKEN_ORIGINE = "token_origine"
+CONF_TOKEN_AGGIORNATO_IL = "token_aggiornato_il"
+
+MAX_EVENTI_CRONOLOGIA = 15
 
 CONF_TIPO_POD = "tipo_pod"  # {pod: "scambio"|"produzione"}, in entry.options
+CONF_ENERGIA_REATTIVA = "energia_reattiva"  # bool in entry.options, opt-in
 TIPO_POD_SCAMBIO = "scambio"
 TIPO_POD_PRODUZIONE = "produzione"
 TIPO_POD_DEFAULT = TIPO_POD_SCAMBIO
 
-# The role is always chosen by hand (options flow, tipo_pod step): it cannot be
-# inferred reliably. 'HasPlant' from getSupplies is not usable (it is True on
-# the exchange POD and null on the production one), and the POD code prefix
-# does not generalize across DSOs and customers.
+# MeteringPointType from getSupplies ("M1" exchange, "M2" production) is used
+# to suggest the initial role during setup; the user can always override it.
 
 # --- Automatic daily curve import + retry queue ------------------------------
 DEFAULT_UPDATE_INTERVAL_MINUTES = 60
@@ -125,8 +146,19 @@ MAX_GIORNI_IN_CODA = 30
 # a hard constraint. Configurable from the integration options.
 ORA_MINIMA_RICHIESTA = 19
 
-# Self-imposed courtesy limit for the recupera_storico action (not a known
-# E-Distribuzione API constraint): async_get_daily_load_profile supports a
-# multi-day range in a single call, up to 181 days. This only prevents a typo
-# in the dates from requesting years of data by mistake in one response.
-MAX_GIORNI_RECUPERO_STORICO = 190  # ~6 months
+# Maximum span per recupera_storico invocation (confirmed 200 OK up to 365 days;
+# internally split into CHUNK_GIORNI_STORICO chunks to keep request latency safe).
+MAX_GIORNI_RECUPERO_STORICO = 365
+CHUNK_GIORNI_STORICO = 180
+
+# Official monthly readings (/xs/misure/reading) are reliable up to ~90 days.
+FINESTRA_LETTURE_GIORNI = 65
+
+# Explicit HTTP timeouts so a stalled backend cannot block the coordinator.
+HTTP_TIMEOUT_SECONDS = 30
+HTTP_CONNECT_TIMEOUT_SECONDS = 10
+
+
+def issue_id_per_entry(issue_base: str, entry_id: str) -> str:
+    """Per-entry Repairs issue id so multiple accounts do not overwrite each other."""
+    return f"{issue_base}_{entry_id}"

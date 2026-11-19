@@ -10,7 +10,6 @@ scripts/verify_login.py.
 """
 from __future__ import annotations
 
-import asyncio
 import importlib.util
 import json
 import sys
@@ -417,7 +416,7 @@ class _SessioneFinta:
         self._body = body
         self.dati_inviati: dict | None = None
 
-    def post(self, url, data=None, headers=None):
+    def post(self, url, data=None, headers=None, **kwargs):
         self.dati_inviati = data
         return _RispostaFinta(self._body)
 
@@ -445,24 +444,13 @@ class TestInvioOtp:
     async def test_invio_non_confermato_non_e_fatale_ma_viene_segnalato(
         self, caplog, monkeypatch, tmp_path
     ):
-        """If the page contains none of the known confirmation messages the
-        flow goes on (the wording might just be different), but it is logged
-        and the flag lets the config flow warn the user."""
-        # The debug dump is written to the cwd: it is redirected to tmp_path so
-        # that otp_send_debug.html is not left inside the repository.
+        """Missing OTP confirmation is logged and flagged without writing raw HTML to disk."""
         monkeypatch.chdir(tmp_path)
         client, _ = _client_su_form_otp(TestAnalizzaPaginaOtp.HTML_PAGINA_OTP)
         await client._async_avvia_invio_otp()
         assert client.otp_invio_confermato is False
         assert "non ha confermato l'invio" in caplog.text
-        # The dump is written in an executor (not to block Home Assistant's event
-        # loop), so it may not exist yet on return.
-        dump = tmp_path / "otp_send_debug.html"
-        for _ in range(50):
-            if dump.exists():
-                break
-            await asyncio.sleep(0.02)
-        assert dump.exists()
+        assert list(tmp_path.iterdir()) == []
 
     async def test_pagina_limite_sessioni_solleva_eccezione_dedicata(self, monkeypatch, tmp_path):
         """With too many open sessions no code is sent: it must be told apart
@@ -577,11 +565,11 @@ class _SessioneACoda:
     def _prossima(self):
         return self._risposte.pop(0)
 
-    def post(self, url, data=None, headers=None, allow_redirects=None):
+    def post(self, url, data=None, headers=None, allow_redirects=None, **kwargs):
         self.post_inviati.append({"url": url, "data": data})
         return self._prossima()
 
-    def get(self, url, headers=None):
+    def get(self, url, headers=None, **kwargs):
         return self._prossima()
 
 
@@ -622,13 +610,14 @@ class TestVerificaNonTroppeSessioni:
                 "Hai superato il numero di sessioni simultanee consentite"
             )
 
-    def test_salva_il_dump_solo_se_richiesto(self, monkeypatch, tmp_path):
+    def test_non_salva_dump_su_disco(self, monkeypatch, tmp_path):
         monkeypatch.chdir(tmp_path)
-        with pytest.raises(auth.TroppeSessioni):
+        with pytest.raises(auth.TroppeSessioni) as errore:
             auth.AuthClient._verifica_non_troppe_sessioni(
-                "sessioni contemporanee superate", "dump.html"
+                "<html>sessioni contemporanee superate</html>"
             )
-        assert (tmp_path / "dump.html").exists()
+        assert "<html>" not in str(errore.value)
+        assert list(tmp_path.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------
@@ -689,24 +678,36 @@ class TestAccessoBloccato:
     def test_e_un_auth_error(self):
         assert issubclass(auth.AccessoBloccato, auth.AuthError)
 
-    async def test_refresh_bloccato_su_entrambi_gli_host(self):
-        """Primary and direct host both blocked: the primary is tried, then
-        the direct one, and only then AccessoBloccato is raised."""
-        session = _SessioneACoda([_RispostaToken(PAGINA_ANTIBOT), _RispostaToken(PAGINA_ANTIBOT)])
+    async def test_refresh_bloccato_su_tutti_gli_host(self):
+        """All three hosts blocked: primary, direct Salesforce org host, and
+        site fallback are tried in order before raising AccessoBloccato."""
+        session = _SessioneACoda(
+            [
+                _RispostaToken(PAGINA_ANTIBOT),
+                _RispostaToken(PAGINA_ANTIBOT),
+                _RispostaToken(PAGINA_ANTIBOT),
+            ]
+        )
         with pytest.raises(auth.AccessoBloccato):
             await auth.AuthClient(session).async_refresh_access_token("rt")
         host_provati = [u["url"].split("/")[2] for u in session.post_inviati]
-        assert host_provati == ["private.e-distribuzione.it", "edistribuzione.my.site.com"]
+        assert host_provati == [
+            "private.e-distribuzione.it",
+            "edistribuzione.my.salesforce.com",
+            "edistribuzione.my.site.com",
+        ]
 
     async def test_refresh_fallback_sul_dominio_diretto(self):
-        """Primary blocked, direct host fine: the refresh succeeds through the
-        direct domain, without raising."""
+        """Primary blocked, direct Salesforce org host fine: refresh succeeds
+        through edistribuzione.my.salesforce.com without raising."""
         session = _SessioneACoda(
             [_RispostaToken(PAGINA_ANTIBOT), _RispostaToken('{"access_token": "nuovo"}')]
         )
         tokens = await auth.AuthClient(session).async_refresh_access_token("rt")
         assert tokens.access_token == "nuovo"
-        assert session.post_inviati[-1]["url"].split("/")[2] == "edistribuzione.my.site.com"
+        assert session.post_inviati[-1]["url"] == (
+            "https://edistribuzione.my.salesforce.com/services/oauth2/token"
+        )
 
     async def test_refresh_con_una_pagina_html_qualunque_e_un_parsing_error(self):
         session = _SessioneACoda([_RispostaToken("<html>manutenzione</html>")])
@@ -822,24 +823,35 @@ INVALID_GRANT = '{"error":"invalid_grant","error_description":"expired access/re
 
 class TestErroriToken:
     async def test_app_blocked_e_un_blocco_non_un_token_revocato(self):
-        session = _SessioneACoda([_RispostaToken(APP_BLOCKED, status=400)])
+        session = _SessioneACoda(
+            [
+                _RispostaToken(APP_BLOCKED, status=400),
+                _RispostaToken(APP_BLOCKED, status=400),
+                _RispostaToken(APP_BLOCKED, status=400),
+            ]
+        )
         with pytest.raises(auth.AppBloccata) as errore:
             await auth.AuthClient(session).async_refresh_access_token("rt")
         assert not isinstance(errore.value, auth.TokenNonValido)
-        # On the main domain (no anti-bot) the other host is not tried: it is
-        # the client that is rejected, not the domain.
-        assert len(session.post_inviati) == 1
+        assert len(session.post_inviati) == 3
 
-    async def test_antibot_poi_app_blocked_sul_dominio_diretto(self):
-        """The case of issue #4: Imperva blocks the main domain and on the
-        direct host Salesforce rejects the OAuth client."""
+    async def test_antibot_poi_app_blocked_su_tutti_i_fallback(self):
+        """Imperva blocks the main domain and both fallback hosts return app_blocked."""
         session = _SessioneACoda(
-            [_RispostaToken(PAGINA_ANTIBOT), _RispostaToken(APP_BLOCKED, status=400)]
+            [
+                _RispostaToken(PAGINA_ANTIBOT),
+                _RispostaToken(APP_BLOCKED, status=400),
+                _RispostaToken(APP_BLOCKED, status=400),
+            ]
         )
         with pytest.raises(auth.AppBloccata):
             await auth.AuthClient(session).async_refresh_access_token("rt")
         host_provati = [u["url"].split("/")[2] for u in session.post_inviati]
-        assert host_provati == ["private.e-distribuzione.it", "edistribuzione.my.site.com"]
+        assert host_provati == [
+            "private.e-distribuzione.it",
+            "edistribuzione.my.salesforce.com",
+            "edistribuzione.my.site.com",
+        ]
 
     async def test_invalid_grant_e_un_token_non_valido(self):
         session = _SessioneACoda([_RispostaToken(INVALID_GRANT, status=400)])
@@ -873,7 +885,7 @@ class _SessioneRedirect:
         self._location = location
         self.get_eseguiti = 0
 
-    async def get(self, url, params=None, headers=None, allow_redirects=None):
+    async def get(self, url, params=None, headers=None, allow_redirects=None, **kwargs):
         self.get_eseguiti += 1
         return _RispostaRedirect(self._location)
 

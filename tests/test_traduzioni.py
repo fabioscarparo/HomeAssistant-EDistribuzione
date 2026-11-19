@@ -65,9 +65,19 @@ def test_ogni_translation_key_del_codice_esiste():
         for ruolo in (TIPO_POD_SCAMBIO, TIPO_POD_PRODUZIONE)
         for immessa in (False, True)
     }
+    usate |= {
+        sensor.EnergiaMeseSensor._chiave_traduzione(
+            SimpleNamespace(tipo_pod=lambda pod, r=ruolo: r), "POD", immessa, precedente
+        )
+        for ruolo in (TIPO_POD_SCAMBIO, TIPO_POD_PRODUZIONE)
+        for immessa in (False, True)
+        for precedente in (False, True)
+    }
+    usate |= {"picco_potenza_mese_corrente", "picco_potenza_mese_precedente"}
     it = _carica("it")
     definite = (
         set(it["entity"]["sensor"])
+        | set(it["entity"]["binary_sensor"])
         | set(it["exceptions"])
         | set(it["selector"])
         | set(it["issues"])

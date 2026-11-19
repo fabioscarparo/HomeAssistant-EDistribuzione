@@ -1,5 +1,4 @@
-# The two checks HACS requires before a repository can be added to the
-# default store: both must pass without any ignored check.
+# Repository validation: HACS, hassfest, lint and unit tests.
 name: Validate
 
 on:
@@ -32,3 +31,42 @@ jobs:
 
       - name: Hassfest validation
         uses: home-assistant/actions/hassfest@master
+
+  lint:
+    name: Ruff lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run ruff
+        run: |
+          pip install ruff
+          ruff check .
+
+  test:
+    name: Pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test dependencies
+        run: pip install -r requirements_test.txt
+
+      - name: Run pytest
+        run: pytest -q

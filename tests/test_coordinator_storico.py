@@ -215,10 +215,10 @@ class TestGuardiaEnergyType:
         (date(2026, 9, 15), date(2026, 9, 15), "data_inizio_troppo_recente", {}),
         (date(2026, 9, 1), date(2026, 9, 15), "data_fine_troppo_recente", {}),
         (
-            date(2026, 1, 1),
+            date(2025, 8, 1),
             date(2026, 9, 14),
             "intervallo_troppo_ampio",
-            {"giorni": "257", "massimo": "190", "fine_prima_parte": "2026-07-09"},
+            {"giorni": "410", "massimo": "365", "fine_prima_parte": "2026-07-31"},
         ),
     ],
 )

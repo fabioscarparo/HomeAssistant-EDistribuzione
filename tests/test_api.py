@@ -97,11 +97,13 @@ class _Sessione:
                 return _Risposta(status, corpo)
         raise AssertionError(f"Nessuna rotta configurata per l'URL: {url}")
 
-    def get(self, url, headers=None, params=None):
+    def get(self, url, headers=None, params=None, **kwargs):
         self.ultimi_params = params
+        self.ultimo_timeout = kwargs.get("timeout")
         return self._risposta_per(url)
 
-    def post(self, url, headers=None, json=None):
+    def post(self, url, headers=None, json=None, **kwargs):
+        self.ultimo_timeout = kwargs.get("timeout")
         return self._risposta_per(url)
 
 
@@ -192,8 +194,9 @@ class TestAsyncGetSupplies:
 
     async def test_status_errore_solleva_eccezione(self):
         client, _ = _client({"getSupplies": (500, {"meta": {"status": "KO"}})})
-        with pytest.raises(aiohttp.ClientResponseError):
+        with pytest.raises(api.ApiError) as errore:
             await client.async_get_supplies()
+        assert errore.value.status == 500
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +299,7 @@ class TestAsyncGetDailyLoadProfile:
     async def test_errore_di_rete_e_un_api_error(self):
         client, sessione = _client_e_sessione({})
 
-        def _get_fallisce(url, headers=None, params=None):
+        def _get_fallisce(url, headers=None, params=None, **kwargs):
             raise aiohttp.ClientConnectorDNSError(
                 Mock(host="xs-misura-p.de-c1.eu1.cloudhub.io", port=443), OSError("dns")
             )

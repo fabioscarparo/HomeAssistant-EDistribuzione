@@ -24,9 +24,14 @@ Dashboard.
   energy returned to it, solar production included.
 - **F1 / F2 / F3 time bands** for both directions, with the ARERA holiday
   calendar.
+- **Peak power, supply metadata & official readings**: contractual/available
+  power, daily & monthly 15-minute peak power (kW), current/previous month
+  official totals, latest monthly billing reading, and opt-in reactive energy
+  and power factor (`cos phi`).
 - **Energy Dashboard** set up with a single action.
 - **POD card** with day, week, month and year views.
-- **Current time band** sensor for automations.
+- **Current time band** sensor and **Access problem** diagnostic binary sensor
+  for automations.
 - **Italian and English**, following each user's language.
 
 <picture>
@@ -147,20 +152,18 @@ different login session and are always rejected.
 
 Each POD has a role, which only changes how entities and statistics are
 named. **Both directions are always downloaded for every POD**, whatever its
-role.
+role. During initial setup the role is suggested automatically from
+E-Distribuzione's `MeteringPointType` (`M1` exchange vs `M2` production), and
+can always be changed later in **Configure -> Meter type per POD**.
 
 - **Regular / exchange meter**: the main electricity meter, the default.
 - **Solar / production meter**: a meter dedicated to photovoltaic
   production.
 
-With an exchange meter only there is nothing to change. With separate
-exchange and production meters, for example a solar system with two meters,
-go to **Settings → Devices & services → E-Distribuzione → Configure → Meter
-type per POD** and set the production meter to **Solar / production meter**.
-The role can be changed at any time.
-
-From the same **Configure** menu you can **Add POD** from your account or
-**Remove POD**; removing a POD keeps the statistics already imported.
+From the same **Configure** menu you can **Add POD** from your account,
+**Remove POD** (keeping already imported statistics), change the **Request
+time**, or enable the opt-in **Reactive energy and power factor** sensors
+(four-quadrant `R1`-`R4` monthly `kvarh` and `cos phi`).
 
 ## Fetching historical data
 
@@ -177,10 +180,11 @@ imports only the **last 3 days**, to check that the POD and the login work.
 3. Select **Perform action** and wait: six months of data can take a few
    tens of seconds.
 
-Each run covers up to **181 days**, about six months: for a longer history,
-run the action over consecutive periods. Running it again over a period that
-was already imported is always safe: samples are updated instead of
-duplicated and corrections published by E-Distribuzione are applied.
+Each run covers up to **365 days** (automatically split into safe chunks when
+over 180 days): for a longer history, run the action over consecutive periods.
+Running it again over a period that was already imported is always safe:
+samples are updated instead of duplicated and corrections published by
+E-Distribuzione are applied.
 
 A green check on the button means that at least one POD received data; a red
 message says what to change. To see how much arrived, see
@@ -229,17 +233,22 @@ E-Distribuzione publishes data with a **one-day delay**. Every day from
 last **3 days** so that later corrections are imported automatically. You
 can change the hour in **Configure → Request time**.
 
-The diagnostic sensors of each POD device show the most recent imported day:
+The sensors of each POD device expose the most recent imported day, supply
+metadata, monthly summaries, peak power and official readings:
 
-| Meter role | Diagnostic sensors |
+| Category | Entities per POD |
 |---|---|
-| Exchange | Last available date, Last day consumption, Last day return to grid |
-| Production | Last available date, Last day production, Last day consumption (technical) |
+| Daily summary (local SQLite) | Last available date, Last day consumption/injection (or production), Last day peak power (kW, with peak time) |
+| Monthly official (`querymonthlytimeofuse`) | Current/previous month consumption & injection (or production, with F1/F2/F3 attributes), Current/previous month peak power (kW, with per-band peaks & % of contractual/available power) |
+| Supply metadata (`getSupplies`) | Contractual power (kW, with voltage level, status, point type, plant regime), Available power (kW) |
+| Official reading (`/reading`) | Latest official reading date (with flow type, reading type, `EA`/`ER` registers and `POT` peaks) |
+| Opt-in reactive (Configure menu) | Current month reactive energy (`kvarh`, `R1`-`R4`), Current month power factor (`cos phi`, `tan phi`) |
 
-They are read from the data already imported, so they stay available after
-a restart and while E-Distribuzione cannot be reached; the **Day** attribute
-says which day they refer to. A direction the meter never measured, such as
-the return to grid without solar panels, shows 0 kWh.
+Values stay available after a restart and while E-Distribuzione cannot be
+reached. A direction the meter never measured, such as the return to grid
+without solar panels, shows 0 kWh. On the parent **E-Distribuzione** account
+device, an **Access problem** diagnostic binary sensor also turns on when
+automated token refresh is blocked.
 
 ## Energy Dashboard
 
@@ -453,11 +462,12 @@ quoting the message shown, and attach these two files. Neither contains
 passwords, OTP codes or tokens.
 
 - **Diagnostics**: **Settings → Devices & services → E-Distribuzione → ⋮ →
-  Download diagnostics**. Versions, access state, last error and import
+  Download diagnostics**. Versions, access state, supply metadata, ARERA band
+  reconciliation, DB/Recorder/Energy Dashboard status, recent events and import
   state, with the POD codes replaced by `POD_1`, `POD_2`...
 - **Debug log**: from the same **⋮** menu, **Enable debug logging**, repeat
   what fails, then **Disable debug logging**: Home Assistant downloads the
-  log. POD codes appear in it, so mask them if you prefer.
+  log. POD codes and OAuth secrets are automatically masked in logs.
 
 ## Languages
 

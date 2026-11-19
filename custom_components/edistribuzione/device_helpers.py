@@ -28,12 +28,10 @@ _VERSIONE_VIA_DEVICE_ID = (2026, 8)
 
 
 def supporta_via_device_id() -> bool:
-    """True if this HA version accepts via_device_id in DeviceInfo.
-
-    When in doubt (version not parseable) returns False: it falls back to
-    via_device, which on old versions is the only thing that works and on new
-    ones produces at most a warning.
-    """
+    """True if this HA version accepts via_device_id in DeviceInfo."""
+    annotations = getattr(dr.DeviceInfo, "__annotations__", None)
+    if isinstance(annotations, dict):
+        return "via_device_id" in annotations
     try:
         maggiore, minore = HA_VERSION.split(".")[:2]
         return (int(maggiore), int(minore)) >= _VERSIONE_VIA_DEVICE_ID

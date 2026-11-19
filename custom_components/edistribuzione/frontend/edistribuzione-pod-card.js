@@ -20,7 +20,7 @@
 
 const CARD_TYPE = "edistribuzione-pod-card";
 const EDITOR_TYPE = "edistribuzione-pod-card-editor";
-const VERSION = "0.7.0";
+const VERSION = "1.0.0-beta.1";
 const SOURCE = "edistribuzione";
 const FASCE = ["f1", "f2", "f3"];
 // Keys of the injection by band (issue #7), next to the consumption ones.
@@ -61,6 +61,8 @@ const STRINGS = {
     empty_text: "Non ci sono ancora consumi importati da E-Distribuzione. Appena configurata, l'integrazione importa da sola gli ultimi giorni; per i periodi precedenti esegui l'azione «Recupera storico». Se non compare nulla, controlla Impostazioni > Riparazioni.",
     not_configured_title: "Integrazione non configurata",
     not_configured_text: "Aggiungi l'integrazione E-Distribuzione per vedere qui i consumi del tuo POD.",
+    pod_not_found_title: "POD non trovato",
+    pod_not_found_text: "Il POD configurato ({pod}) non ha statistiche importate. Controlla il codice nella configurazione della card.",
     history_title: "Storico non ancora scaricato",
     history_text: "Ci sono dati solo dal {date}. Lo storico non si scarica in automatico: per vedere i mesi precedenti esegui l'azione «Recupera storico».",
     ask_admin: "Chiedi a un amministratore di eseguirla.",
@@ -97,6 +99,8 @@ const STRINGS = {
     empty_text: "No consumption has been imported from E-Distribuzione yet. Right after setup the integration imports the last few days on its own; for earlier periods run the \"Fetch history\" action. If nothing shows up, check Settings > Repairs.",
     not_configured_title: "Integration not set up",
     not_configured_text: "Add the E-Distribuzione integration to see your POD's consumption here.",
+    pod_not_found_title: "POD not found",
+    pod_not_found_text: "The configured POD ({pod}) has no imported statistics. Check the code in the card configuration.",
     history_title: "History not downloaded yet",
     history_text: "Data is only available from {date}. History is not downloaded automatically: to see earlier months, run the \"Fetch history\" action.",
     ask_admin: "Ask an administrator to run it.",
@@ -150,6 +154,23 @@ const salvaPreferenza = (chiave, valore) => {
 
 const escapeHtml = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+// Match statistics._sanitize_statistic_id so configured POD codes always match slugs.
+const sanitizzaSlug = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+
+// Bounded Intl caches to avoid recreating formatters on every chart tick and tooltip.
+const _nfCache = new Map();
+const _fmtCache = new Map();
+const _dodiciCache = new Map();
+const _cacheGet = (map, key, build) => {
+  let val = map.get(key);
+  if (val === undefined) {
+    if (map.size >= 64) map.clear();
+    val = build();
+    map.set(key, val);
+  }
+  return val;
+};
 
 // --- Civil dates in the server's time zone --------------------------------------
 //
@@ -292,7 +313,17 @@ class EdistribuzionePodCard extends HTMLElement {
     this._larghezza = 0;
     this._hover = null;
     this._richiesta = 0;
+    this._avvioSeq = 0;
     this._firma = "";
+    this._nascondiTooltipEsterno = (ev) => {
+      if (this._hover !== null && !ev.composedPath().includes(this)) {
+        this._hover = null;
+        const tip = this.shadowRoot?.querySelector(".tooltip");
+        const banda = this.shadowRoot?.querySelector(".hover-band");
+        if (tip) tip.hidden = true;
+        if (banda) banda.setAttribute("width", 0);
+      }
+    };
   }
 
   setConfig(config) {
@@ -305,12 +336,16 @@ class EdistribuzionePodCard extends HTMLElement {
       throw new Error(`decimals deve essere un numero intero da 0 a ${MAX_DECIMALI}`);
     }
     const podPrima = this._config.pod;
+    const vistaPrima = this._vista;
     this._config = { show_injection: true, ...config };
     this._vista = this._config.period || this._vista || "month";
-    if (this._hass && podPrima !== this._config.pod) {
+    if (this._hass && sanitizzaSlug(podPrima) !== sanitizzaSlug(this._config.pod)) {
       this._estremi = null;
       this._ancora = null;
+      this._dati = null;
       this._avvia();
+    } else if (this._hass && this._config.period && this._vista !== vistaPrima && this._pod) {
+      this._carica();
     } else {
       this._render();
     }
@@ -337,6 +372,7 @@ class EdistribuzionePodCard extends HTMLElement {
   }
 
   connectedCallback() {
+    document.addEventListener("pointerdown", this._nascondiTooltipEsterno);
     this._ro = new ResizeObserver((entries) => {
       const w = Math.floor(entries[0].contentRect.width);
       if (w && w !== this._larghezza) {
@@ -357,6 +393,7 @@ class EdistribuzionePodCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    document.removeEventListener("pointerdown", this._nascondiTooltipEsterno);
     this._ro?.disconnect();
     this._staccata = true;
   }
@@ -377,19 +414,29 @@ class EdistribuzionePodCard extends HTMLElement {
 
   get _pod() {
     if (!this._pods?.length) return null;
-    const scelto = (this._config.pod || "").toLowerCase();
-    return this._pods.find((p) => p.slug === scelto) || this._pods[0];
+    if (!this._config.pod) return this._pods[0];
+    const scelto = sanitizzaSlug(this._config.pod);
+    return this._pods.find((p) => p.slug === scelto) || null;
   }
 
   async _avvia() {
+    const seq = ++this._avvioSeq;
     this._render();
     try {
-      if (!this._pods) this._pods = await this._scopriPod(this._hass);
+      if (!this._pods) {
+        const pods = await this._scopriPod(this._hass);
+        if (seq !== this._avvioSeq) return;
+        this._pods = pods;
+      }
       if (!this._pod) {
         this._render();
         return;
       }
-      if (!this._estremi) this._estremi = await this._leggiEstremi();
+      if (!this._estremi) {
+        const estremi = await this._leggiEstremi();
+        if (seq !== this._avvioSeq) return;
+        this._estremi = estremi;
+      }
       if (!this._ancora) {
         this._ancora = this._estremi.ultimo
           ? civile(new Date(this._estremi.ultimo - 1), this._tz)
@@ -397,6 +444,7 @@ class EdistribuzionePodCard extends HTMLElement {
       }
       await this._carica();
     } catch (err) {
+      if (seq !== this._avvioSeq) return;
       this._errore = err?.message || String(err);
       this._render();
     }
@@ -407,13 +455,16 @@ class EdistribuzionePodCard extends HTMLElement {
     const nostre = new Map(
       elenco.filter((s) => s.source === SOURCE).map((s) => [s.statistic_id, s])
     );
+    // Discover PODs from both consumption and injection series (supports production-only meters).
+    const slugs = new Set();
+    for (const id of nostre.keys()) {
+      const m = id.match(/^edistribuzione:(.+)_energia(?:_immessa)?$/);
+      if (m) slugs.add(m[1]);
+    }
     const pods = [];
-    for (const [id, meta] of nostre) {
-      const m = id.match(/^edistribuzione:(.+)_energia$/);
-      if (!m) continue;
-      const slug = m[1];
+    for (const slug of slugs) {
       const ids = {
-        totale: id,
+        totale: `${SOURCE}:${slug}_energia`,
         immessa: `${SOURCE}:${slug}_energia_immessa`,
         f1: `${SOURCE}:${slug}_energia_f1`,
         f2: `${SOURCE}:${slug}_energia_f2`,
@@ -422,17 +473,18 @@ class EdistribuzionePodCard extends HTMLElement {
         immessa_f2: `${SOURCE}:${slug}_energia_immessa_f2`,
         immessa_f3: `${SOURCE}:${slug}_energia_immessa_f3`,
       };
+      const nomeTotale = nostre.get(ids.totale)?.name || "";
       const nomeImmessa = nostre.get(ids.immessa)?.name || "";
       pods.push({
         slug,
         codice: slug.toUpperCase(),
-        nome: meta.name,
+        nome: nomeTotale || nomeImmessa || slug.toUpperCase(),
         ids,
+        haTotale: nostre.has(ids.totale),
         haFasce: FASCE.every((f) => nostre.has(ids[f])),
         haImmessa: nostre.has(ids.immessa),
-        // Present after the first import with version 0.8.1 or later.
         haFasceImmessa: FASCE_IMMESSA.every((k) => nostre.has(ids[k])),
-        produzione: /produzione/i.test(nomeImmessa),
+        produzione: /\b(produzione|production)\b/i.test(nomeImmessa),
       });
     }
     return pods.sort((a, b) => a.codice.localeCompare(b.codice));
@@ -457,24 +509,39 @@ class EdistribuzionePodCard extends HTMLElement {
   }
 
   async _leggiEstremi() {
-    // Two cheap requests: the months with data (first and last), then the
-    // hours of the last month to know up to what hour the data goes.
-    const id = this._pod.ids.totale;
-    const mesi = (await this._statistiche([id], new Date(Date.UTC(2015, 0, 1)), null, "month"))[id];
+    // Query both consumption and injection series so production-only PODs work too.
+    const idsPrimari = [];
+    if (this._pod.haTotale) idsPrimari.push(this._pod.ids.totale);
+    if (this._pod.haImmessa) idsPrimari.push(this._pod.ids.immessa);
+    if (!idsPrimari.length) return { primo: null, primoGiorno: null, ultimo: null };
+
+    const perId = await this._statistiche(idsPrimari, new Date(Date.UTC(2015, 0, 1)), null, "month");
+    const mesi = idsPrimari.flatMap((id) => perId[id] || []);
     if (!mesi.length) return { primo: null, primoGiorno: null, ultimo: null };
-    const ultimoMese = mesi[mesi.length - 1];
-    const ore = (await this._statistiche([id], new Date(ultimoMese.start), null, "hour"))[id];
-    // The exact first day is only needed for a short history (see
-    // _suggerimentoStorico): one more request only in that case.
-    let primoGiorno = mesi[0].start;
-    if (mesi.length <= 2) {
-      const giorni = (await this._statistiche([id], new Date(mesi[0].start), null, "day"))[id];
-      if (giorni.length) primoGiorno = giorni[0].start;
+
+    let primo = Infinity;
+    let ultimoStart = -Infinity;
+    let ultimoEnd = -Infinity;
+    const mesiDistinti = new Set();
+    for (const r of mesi) {
+      mesiDistinti.add(r.start);
+      if (r.start < primo) primo = r.start;
+      if (r.start > ultimoStart) ultimoStart = r.start;
+      if (r.end > ultimoEnd) ultimoEnd = r.end;
+    }
+
+    const oreRes = await this._statistiche(idsPrimari, new Date(ultimoStart), null, "hour");
+    const ore = idsPrimari.flatMap((id) => oreRes[id] || []);
+    let primoGiorno = primo;
+    if (mesiDistinti.size <= 2) {
+      const giorniRes = await this._statistiche(idsPrimari, new Date(primo), null, "day");
+      const giorni = idsPrimari.flatMap((id) => giorniRes[id] || []);
+      if (giorni.length) primoGiorno = Math.min(...giorni.map((g) => g.start));
     }
     return {
-      primo: mesi[0].start,
+      primo,
       primoGiorno,
-      ultimo: ore.length ? ore[ore.length - 1].end : ultimoMese.end,
+      ultimo: ore.length ? Math.max(...ore.map((o) => o.end)) : ultimoEnd,
     };
   }
 
@@ -504,13 +571,22 @@ class EdistribuzionePodCard extends HTMLElement {
 
     const inizioDate = mezzanotte(inizio, tz);
     const fineDate = mezzanotte(fine, tz);
+    const fineMs = fineDate.getTime();
     const slot = [];
     if (period === "hour") {
-      for (let t = inizioDate.getTime(); t < fineDate.getTime(); t += HOUR_MS) slot.push(t);
+      for (let t = inizioDate.getTime(); t < fineMs; t += HOUR_MS) slot.push(t);
     } else if (period === "day") {
-      for (let c = inizio; mezzanotte(c, tz) < fineDate; c = addGiorni(c, 1)) slot.push(mezzanotte(c, tz).getTime());
+      for (let c = inizio; ; c = addGiorni(c, 1)) {
+        const t = mezzanotte(c, tz).getTime();
+        if (t >= fineMs) break;
+        slot.push(t);
+      }
     } else {
-      for (let c = inizio; mezzanotte(c, tz) < fineDate; c = addMesi(c, 1)) slot.push(mezzanotte(c, tz).getTime());
+      for (let c = inizio; ; c = addMesi(c, 1)) {
+        const t = mezzanotte(c, tz).getTime();
+        if (t >= fineMs) break;
+        slot.push(t);
+      }
     }
     return { inizio: inizioDate, fine: fineDate, period, slot, inizioCivile: inizio, fineCivile: fine };
   }
@@ -538,7 +614,8 @@ class EdistribuzionePodCard extends HTMLElement {
     this._hover = null;
     this._render();
 
-    const ids = [pod.ids.totale];
+    const ids = [];
+    if (pod.haTotale) ids.push(pod.ids.totale);
     if (pod.haFasce) ids.push(pod.ids.f1, pod.ids.f2, pod.ids.f3);
     if (pod.haImmessa) ids.push(pod.ids.immessa);
     if (pod.haFasceImmessa) ids.push(...FASCE_IMMESSA.map((k) => pod.ids[k]));
@@ -601,31 +678,40 @@ class EdistribuzionePodCard extends HTMLElement {
   _numero(v, cifre) {
     if (v === null || v === undefined || Number.isNaN(v)) return "-";
     const a = Math.abs(v);
-    // Explicit digits (the chart axis) win over the decimals option, which
-    // wins over the automatic rule: fewer digits as the value grows.
+    // Explicit digits (chart axis) win over decimals option, then automatic scale.
     const d = cifre ?? this._config.decimals ?? (a >= 100 ? 0 : a >= 10 ? 1 : 2);
-    return new Intl.NumberFormat(this._locale, {
-      minimumFractionDigits: d, maximumFractionDigits: d,
-      useGrouping: this._hass?.locale?.number_format !== "none",
-    }).format(v);
+    const grouping = this._hass?.locale?.number_format !== "none";
+    const key = `${this._locale || ""}|${d}|${grouping ? 1 : 0}`;
+    const nf = _cacheGet(_nfCache, key, () => new Intl.NumberFormat(this._locale, {
+      minimumFractionDigits: d, maximumFractionDigits: d, useGrouping: grouping,
+    }));
+    return nf.format(v);
   }
 
   _data(date, opzioni) {
     const lang = this._hass?.locale?.language || "it";
-    const tf = this._hass?.locale?.time_format;
+    const tf = this._hass?.locale?.time_format || "";
     const extra = tf === "12" ? { hourCycle: "h12" } : tf === "24" ? { hourCycle: "h23" } : {};
-    return new Intl.DateTimeFormat(lang, { timeZone: this._tz, ...extra, ...opzioni }).format(date);
+    const key = `${lang}|${this._tz}|${tf}|${JSON.stringify(opzioni)}`;
+    const dtf = _cacheGet(_fmtCache, key, () => new Intl.DateTimeFormat(lang, {
+      timeZone: this._tz, ...extra, ...opzioni,
+    }));
+    return dtf.format(date);
   }
 
   _titoloPeriodo(iv) {
     if (this._vista === "day") return this._data(iv.inizio, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
     if (this._vista === "week") {
-      // Built by hand instead of formatRange: in some languages formatRange
-      // adds a leading zero to the days ("04 ott").
-      const ultimo = mezzanotte(addGiorni(iv.fineCivile, -1), this._tz);
-      const stessoMese = iv.inizioCivile.m === addGiorni(iv.fineCivile, -1).m;
-      const da = this._data(iv.inizio, stessoMese ? { day: "numeric" } : { day: "numeric", month: "short" });
-      return `${da} - ${this._data(ultimo, { day: "numeric", month: "short", year: "numeric" })}`;
+      const ultimoCivile = addGiorni(iv.fineCivile, -1);
+      const ultimo = mezzanotte(ultimoCivile, this._tz);
+      const stessoAnno = iv.inizioCivile.y === ultimoCivile.y;
+      const stessoMese = stessoAnno && iv.inizioCivile.m === ultimoCivile.m;
+      const optsDa = stessoMese
+        ? { day: "numeric" }
+        : stessoAnno
+          ? { day: "numeric", month: "short" }
+          : { day: "numeric", month: "short", year: "numeric" };
+      return `${this._data(iv.inizio, optsDa)} - ${this._data(ultimo, { day: "numeric", month: "short", year: "numeric" })}`;
     }
     if (this._vista === "month") return this._data(iv.inizio, { month: "long", year: "numeric" });
     return this._data(iv.inizio, { year: "numeric" });
@@ -646,8 +732,6 @@ class EdistribuzionePodCard extends HTMLElement {
     const { iv } = this._dati;
     const t = new Date(iv.slot[i]);
     if (iv.period === "hour") {
-      // With the 12-hour clock "3 AM" instead of "03:00 AM": shorter, like
-      // the labels of the native charts.
       return this._dodiciOre()
         ? this._data(t, { hour: "numeric" })
         : this._data(t, { hour: "2-digit", minute: "2-digit" });
@@ -657,12 +741,16 @@ class EdistribuzionePodCard extends HTMLElement {
   }
 
   _dodiciOre() {
-    const ciclo = new Intl.DateTimeFormat(this._hass?.locale?.language || "it", {
-      timeZone: this._tz, hour: "numeric",
-      ...(this._hass?.locale?.time_format === "12" ? { hourCycle: "h12" }
-        : this._hass?.locale?.time_format === "24" ? { hourCycle: "h23" } : {}),
-    }).resolvedOptions().hourCycle;
-    return ciclo === "h11" || ciclo === "h12";
+    const lang = this._hass?.locale?.language || "it";
+    const tf = this._hass?.locale?.time_format || "";
+    const key = `${lang}|${this._tz}|${tf}`;
+    return _cacheGet(_dodiciCache, key, () => {
+      const ciclo = new Intl.DateTimeFormat(lang, {
+        timeZone: this._tz, hour: "numeric",
+        ...(tf === "12" ? { hourCycle: "h12" } : tf === "24" ? { hourCycle: "h23" } : {}),
+      }).resolvedOptions().hourCycle;
+      return ciclo === "h11" || ciclo === "h12";
+    });
   }
 
   // --- Colours from the current theme ----------------------------------------
@@ -738,25 +826,23 @@ class EdistribuzionePodCard extends HTMLElement {
     // totals and split by band
     const valori = this._dati?.valori || [];
     const somma = (k) => valori.reduce((acc, v) => (v[k] === null ? acc : (acc ?? 0) + v[k]), null);
-    const sommaFasce = FASCE.reduce((a, f) => a + (somma(f) || 0), 0);
-    const prelievo = somma("totale") ?? (sommaFasce || null);
+    const sommaFasce = FASCE.reduce((a, f) => (somma(f) === null ? a : (a ?? 0) + somma(f)), null);
+    const prelievo = somma("totale") ?? sommaFasce;
+    const mostraPrelievo = !pod || pod.haTotale || prelievo !== null;
     const mostraImmessa = !!pod?.haImmessa && this._config.show_injection !== false;
     const nomeImmessa = pod?.produzione ? t("produced") : t("injected");
-    // <wbr>: in a narrow card a long value (a year with decimals: 3) puts
-    // the unit on the next line instead of spilling out of its column.
     const totale = (etichetta, colore, valore) => `
       <div class="total">
         <div class="total-label"><span class="dot" style="background:${rgbCss(colore)}"></span>${escapeHtml(etichetta)}</div>
         <div class="total-value">${this._numero(valore)}<wbr><span class="unit">kWh</span></div>
       </div>`;
-    $(".totals").innerHTML = totale(t("withdrawn"), colori.totale, prelievo)
+    $(".totals").innerHTML = (mostraPrelievo ? totale(t("withdrawn"), colori.totale, prelievo) : "")
       + (mostraImmessa ? totale(nomeImmessa, colori.immessa, somma("immessa")) : "");
 
-    // Injection by band under the consumption one; the two titles only when
-    // both are shown, so the card looks as before without injection bands.
+    const fascePrelievo = mostraPrelievo && !!pod?.haFasce;
     const fasceImmessa = mostraImmessa && !!pod?.haFasceImmessa;
-    this._renderFasce($(".fasce"), FASCE, !!pod?.haFasce, fasceImmessa ? t("withdrawn") : "", somma, colori);
-    this._renderFasce($(".fasce-immessa"), FASCE_IMMESSA, fasceImmessa, nomeImmessa, somma, colori);
+    this._renderFasce($(".fasce"), FASCE, fascePrelievo, fasceImmessa ? t("withdrawn") : "", somma, colori);
+    this._renderFasce($(".fasce-immessa"), FASCE_IMMESSA, fasceImmessa, fascePrelievo ? nomeImmessa : "", somma, colori);
 
     $(".chart").classList.toggle("loading", this._caricamento);
     this._larghezza = $(".chart").clientWidth || this._larghezza;
@@ -782,16 +868,19 @@ class EdistribuzionePodCard extends HTMLElement {
   }
 
   _renderVuota() {
-    // No E-Distribuzione statistics at all: tell apart "integration missing"
-    // from "set up, but nothing imported yet", each with the step to take.
-    const t = (k) => traduci(this._hass, k);
+    const t = (k, v) => traduci(this._hass, k, v);
+    const admin = !!this._hass.user?.is_admin;
+    const podNonTrovato = Boolean(this._config.pod && this._pods?.length);
     const configurata = (this._hass.config?.components || []).includes(SOURCE);
-    const chiave = configurata ? "empty" : "not_configured";
-    if (this._modo === `vuoto-${chiave}`) return;
-    this._modo = `vuoto-${chiave}`;
-    const alert = configurata
-      ? this._alertConAzione(t("empty_title"), t("empty_text"), t("fetch_history"), URL_AZIONE_STORICO)
-      : this._alertConAzione(t("not_configured_title"), t("not_configured_text"), t("configure"), URL_CONFIGURA);
+    const chiave = podNonTrovato ? "pod_not_found" : configurata ? "empty" : "not_configured";
+    const modo = `vuoto-${chiave}-${lingua(this._hass)}-${admin ? 1 : 0}-${this._config.pod || ""}`;
+    if (this._modo === modo) return;
+    this._modo = modo;
+    const alert = podNonTrovato
+      ? `<ha-alert alert-type="warning" title="${escapeHtml(t("pod_not_found_title"))}">${escapeHtml(t("pod_not_found_text", { pod: this._config.pod }))}</ha-alert>`
+      : configurata
+        ? this._alertConAzione(t("empty_title"), t("empty_text"), t("fetch_history"), URL_AZIONE_STORICO)
+        : this._alertConAzione(t("not_configured_title"), t("not_configured_text"), t("configure"), URL_CONFIGURA);
     this.shadowRoot.innerHTML = `<style>${STILE}</style><ha-card><div class="empty-card">${alert}</div></ha-card>`;
     this._collegaPulsanti(this.shadowRoot);
   }
@@ -923,7 +1012,11 @@ class EdistribuzionePodCard extends HTMLElement {
 
   _percentuale(v, tot) {
     if (!tot) return "-";
-    return new Intl.NumberFormat(this._locale, { style: "percent", maximumFractionDigits: 0 }).format(v / tot);
+    const key = `pct|${this._locale || ""}`;
+    const nf = _cacheGet(_nfCache, key, () => new Intl.NumberFormat(this._locale, {
+      style: "percent", maximumFractionDigits: 0,
+    }));
+    return nf.format(v / tot);
   }
 
   _renderGrafico() {
@@ -940,12 +1033,12 @@ class EdistribuzionePodCard extends HTMLElement {
     const colori = this._colori();
     const n = iv.slot.length;
     const mostraImmessa = !!pod?.haImmessa && this._config.show_injection !== false;
-    const serie = pod?.haFasce ? FASCE : ["totale"];
+    const serie = pod?.haFasce ? FASCE : pod?.haTotale ? ["totale"] : [];
     const serieImmessa = mostraImmessa ? (pod.haFasceImmessa ? FASCE_IMMESSA : ["immessa"]) : [];
 
-    const positivo = valori.map((v) => serie.reduce((a, k) => a + (v[k] || 0), 0));
-    const negativo = valori.map((v) => -serieImmessa.reduce((a, k) => a + (v[k] || 0), 0));
-    const vuoto = valori.every((v, i) => !positivo[i] && !negativo[i] && v.totale === null);
+    const positivo = valori.map((v) => serie.reduce((a, k) => a + Math.max(0, v[k] || 0), 0));
+    const negativo = valori.map((v) => -serieImmessa.reduce((a, k) => a + Math.max(0, v[k] || 0), 0));
+    const vuoto = valori.every((v, i) => !positivo[i] && !negativo[i] && v.totale === null && v.immessa === null);
     const scala = scalaArrotondata(Math.min(0, ...negativo), Math.max(0, ...positivo), 5);
 
     const H = 196;
@@ -996,16 +1089,14 @@ class EdistribuzionePodCard extends HTMLElement {
     for (let i = 0; i < n; i++) {
       const x = left + slotW * i + (slotW - barW) / 2;
       let acc = 0;
-      const presenti = serie.filter((k) => valori[i][k]);
+      const presenti = serie.filter((k) => valori[i][k] > 0);
       presenti.forEach((k, j) => {
         const v = valori[i][k];
         parti.push(segmento(x, y(acc), y(acc + v), colori[k], j === presenti.length - 1, false));
         acc += v;
       });
-      // Injection below zero, stacked the same way: F1 next to the axis, the
-      // outermost segment rounded at the bottom.
       let giu = 0;
-      const presentiImmessa = serieImmessa.filter((k) => valori[i][k]);
+      const presentiImmessa = serieImmessa.filter((k) => valori[i][k] > 0);
       presentiImmessa.forEach((k, j) => {
         const v = valori[i][k];
         parti.push(segmento(x, y(-giu), y(-(giu + v)), colori[k], false, j === presentiImmessa.length - 1));
@@ -1054,20 +1145,21 @@ class EdistribuzionePodCard extends HTMLElement {
       const tw = tip.offsetWidth;
       const lx = cx < W / 2 ? cx + slotW / 2 + 8 : cx - slotW / 2 - 8 - tw;
       tip.style.left = `${Math.max(0, Math.min(W - tw, lx))}px`;
-      // With the injection bands the tooltip can be taller than the chart:
-      // it moves up instead of being cut by the bottom of the card.
-      tip.style.top = `${Math.min(top, H - tip.offsetHeight)}px`;
+      tip.style.top = `${Math.max(0, Math.min(top, H - tip.offsetHeight))}px`;
     };
     const nascondi = () => {
       this._hover = null;
       banda.setAttribute("width", 0);
       tip.hidden = true;
     };
+    let ultimoPointer = "mouse";
+    svg.addEventListener("pointerdown", (ev) => { ultimoPointer = ev.pointerType || "mouse"; });
     svg.addEventListener("pointermove", (ev) => ev.pointerType === "mouse" && mostra(indice(ev)));
     svg.addEventListener("pointerleave", (ev) => ev.pointerType === "mouse" && nascondi());
     svg.addEventListener("click", (ev) => {
       const i = indice(ev);
-      if (i === this._hover && ev.pointerType !== "mouse") nascondi();
+      const pt = ev.pointerType || ultimoPointer;
+      if (i === this._hover && pt !== "mouse") nascondi();
       else mostra(i);
     });
     if (this._hover !== null && this._hover < n) mostra(this._hover);
@@ -1081,15 +1173,14 @@ class EdistribuzionePodCard extends HTMLElement {
         <span class="tip-name">${escapeHtml(nome)}</span><span class="tip-value">${this._numero(valore)} kWh</span></div>`;
     const righe = [];
     if (serie.length > 1) {
-      const presenti = [...serie].reverse().filter((k) => v[k]);
+      const presenti = [...serie].reverse().filter((k) => v[k] > 0);
       for (const k of presenti) righe.push(riga(colori[k], k.toUpperCase(), v[k]));
-      // The total is only needed with more than one band (an hour always has one).
       if (v.totale !== null && presenti.length !== 1) righe.push(`<div class="tip-row tip-total"><span class="tip-name">${escapeHtml(t("withdrawn"))}</span><span class="tip-value">${this._numero(v.totale)} kWh</span></div>`);
-    } else if (v.totale !== null) {
+    } else if (serie.length === 1 && v.totale !== null) {
       righe.push(riga(colori.totale, t("withdrawn"), v.totale));
     }
     const nomeImmessa = this._pod.produzione ? t("produced") : t("injected");
-    const fasceImmessa = this._pod.haFasceImmessa ? FASCE_IMMESSA.filter((k) => v[k]) : [];
+    const fasceImmessa = this._pod.haFasceImmessa ? FASCE_IMMESSA.filter((k) => v[k] > 0) : [];
     if (mostraImmessa && fasceImmessa.length > 1) {
       for (const k of fasceImmessa) righe.push(riga(colori[k], `${nomeImmessa} ${k.slice(-2).toUpperCase()}`, v[k]));
       if (v.immessa) righe.push(`<div class="tip-row tip-total"><span class="tip-name">${escapeHtml(nomeImmessa)}</span><span class="tip-value">${this._numero(v.immessa)} kWh</span></div>`);
@@ -1256,19 +1347,26 @@ class EdistribuzionePodCardEditor extends HTMLElement {
         .call(null, hass)
         .then((pods) => {
           this._pods = pods;
-          this._render();
+          this._render(true);
         })
         .catch(() => {
           this._pods = [];
-          this._render();
+          this._render(true);
         });
     }
-    this._render();
+    // Avoid rebuilding ha-form schema/data on every unrelated HA state change.
+    const firma = `${lingua(hass)}|${hass.themes?.darkMode ? 1 : 0}`;
+    if (!this._form || firma !== this._firmaEditor) {
+      this._firmaEditor = firma;
+      this._render(true);
+    } else {
+      this._form.hass = hass;
+    }
   }
 
   setConfig(config) {
     this._config = config;
-    this._render();
+    this._render(true);
   }
 
   _schema() {
@@ -1296,24 +1394,24 @@ class EdistribuzionePodCardEditor extends HTMLElement {
     ];
   }
 
-  _render() {
+  _render(aggiornaSchema = false) {
     if (!this._hass || !this._config) return;
     if (!this._form) {
       this._form = document.createElement("ha-form");
       this._form.addEventListener("value-changed", (ev) => {
         const config = { ...ev.detail.value };
-        // An emptied field leaves the option out: for decimals that means
-        // the automatic digits again.
         for (const k of Object.keys(config)) if (config[k] === "" || config[k] == null) delete config[k];
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
       });
       this.appendChild(this._form);
+      aggiornaSchema = true;
     }
+    this._form.hass = this._hass;
+    if (!aggiornaSchema) return;
     const labels = {
       pod: "ed_pod", name: "ed_name", icon: "ed_icon", period: "ed_period", decimals: "ed_decimals",
       show_injection: "ed_show_injection",
     };
-    this._form.hass = this._hass;
     this._form.data = {
       pod: this._pods?.[0]?.slug,
       period: "month",

@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.0.0-beta.1
+### Added
+- **Supply metadata & automatic M1/M2 detection**: reads technical supply details from
+  `getSupplies` (`ContractualPower`, `AvailablePower`, `DeductiblePower`, `VoltageLevel`,
+  `SupplyStatusId`, `MeteringPointType`, `HasPlant`, `IncentivizedPlant`) to expose
+  **Contractual power** and **Available power** diagnostic sensors per POD and pre-select
+  exchange (`M1`) vs production (`M2`) meter roles during setup.
+- **Peak power & official monthly totals**:
+  - **Last day peak power** (`kW`) computed locally from 15-minute SQLite samples (zero extra API
+    calls), with peak time and percentage of contractual/available power.
+  - **Current month** and **Previous month** energy (`kWh`, with official F1/F2/F3 breakdown) and
+    **peak power** (`kW`, with per-band peaks and threshold percentages) via
+    `querymonthlytimeofuse`.
+- **Latest official billing reading**: monthly diagnostic sensor per POD via `/xs/misure/reading`
+  with date, flow type (e.g. `PDO2G_R`), reading type (`E`/`S`), `EA`/`ER` registers and `POT`
+  peaks.
+- **Opt-in reactive energy & power factor**: enable in **Configure -> Reactive energy and power
+  factor** to track monthly four-quadrant reactive energy (`R1`-`R4`, `kvarh`) and withdrawal
+  power factor (`cos phi`, `tan phi`).
+- **Access problem diagnostic binary sensor** on the account device for automations and alerts.
+- **Fetch history up to 365 days** per run (with safe internal 180-day chunking) and optional
+  structured response data (`SupportsResponse.OPTIONAL`).
+- **Expanded diagnostics**: local SQLite stats, Recorder series status, Energy Dashboard status,
+  Lovelace card status, token origin/timestamp, next-poll state, 15-event ring buffer, and
+  automatic **ARERA band reconciliation** comparing local F1/F2/F3 sums against official monthly
+  totals.
+- Automated `ruff` linting and `pytest` execution in GitHub Actions CI.
+
+### Changed
+- **Three-host OAuth token refresh fallback**: refreshes now try `private.e-distribuzione.it`, then
+  the direct Salesforce org host (`edistribuzione.my.salesforce.com`, bypassing both Imperva
+  anti-bot and `my.site.com` Transaction Security `app_blocked`), then `edistribuzione.my.site.com`.
+- **Best-effort OAuth token revocation** on integration removal (`async_remove_entry`) to free
+  portal session slots.
+- **Incremental Recorder statistics import** (~99.9% fewer writes on daily cycles) with all
+  SQLite/cumulative work offloaded to the executor, SQLite WAL mode, and per-hour ARERA
+  classification.
+- **Home Assistant 2026.x+ compatibility**: supports the unified Energy Dashboard grid config
+  format (while keeping HA 2025.4+ support), uses `entry.runtime_data` and `async_setup`, and
+  avoids duplicating manual F1/F2/F3 configurations.
+
+### Fixed
+- **Privacy & security hardening**: removed raw HTML debug dumps to disk, redacted POD codes,
+  OAuth tokens, query secrets and tax codes across logs/exceptions/diagnostics (including removed
+  PODs and lowercase slugs), enforced strict OAuth `state` validation, added explicit HTTP
+  timeouts, and masked password/redirect fields with HA `TextSelector`.
+- **Concurrency & reliability**: serialized token refresh and imports with `asyncio.Lock`,
+  scoped Repairs issues per config entry, stopped 24/7 hourly polling for PODs without data after
+  bootstrap, retried queued backlog even when yesterday is already present, handled asymmetric
+  `A1`/`A2` delays, rejected orphaned POD devices in `recupera_storico`, and added account
+  `unique_id` deduplication.
+- **POD Lovelace card**: fixed production-only POD discovery, `period` config updates, editor
+  re-render loop on unrelated state updates, async startup race condition, invalid configured POD
+  warning, Safari touch/outside-click tooltip dismissal, cross-year week labels, zero-value band
+  totals, and bounded `Intl` caches.
+
 ## 0.8.9
 ### Added
 - The POD card can show a fixed number of decimals, from 0 to 3, to compare a month or a year

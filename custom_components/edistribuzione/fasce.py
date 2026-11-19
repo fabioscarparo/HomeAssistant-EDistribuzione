@@ -132,28 +132,28 @@ def prossimo_cambio(istante: datetime) -> datetime:
     raise RuntimeError(f"Nessun cambio di fascia nelle due settimane dopo {istante}")
 
 
+def classifica_ore(
+    ore: list[tuple[datetime, float]],
+) -> dict[str, list[tuple[datetime, float]]]:
+    """Split already-aggregated hourly (utc_hour_start, kwh) pairs into F1/F2/F3.
+
+    ARERA band boundaries always align with full Italian hours, so classifying
+    once per hour is exact and 4x faster than per 15-minute sample.
+    """
+    risultato: dict[str, list[tuple[datetime, float]]] = {f: [] for f in FASCE}
+    for ora, kwh in ore:
+        corrente = fascia(ora)
+        for f in FASCE:
+            risultato[f].append((ora, kwh if f == corrente else 0.0))
+    return risultato
+
+
 def aggrega_ore_per_fascia(
     campioni: list[tuple[datetime, float]],
 ) -> dict[str, list[tuple[datetime, float]]]:
-    """Hourly buckets per band, from the same 15-minute samples (UTC aware)
-    that statistics._aggrega_ore sums for the total series.
-
-    Each series contains ALL the hours in which at least one sample exists, with
-    0 kWh in the hours that belong to another band. The three series therefore
-    have exactly the same timestamps as the total series, their cumulative sum
-    advances in parallel, and F1 + F2 + F3 = total hour by hour.
-
-    The band is decided sample by sample (not per hour): with sampleFrequency=15
-    it makes no difference, but it stays correct even if a day arrived with
-    different intervals.
-    """
-    bucket: dict[str, dict[datetime, float]] = {f: defaultdict(float) for f in FASCE}
-    ore: set[datetime] = set()
-
+    """Hourly buckets per band from 15-minute UTC-aware samples."""
+    bucket: dict[datetime, float] = defaultdict(float)
     for ts, kwh in campioni:
         inizio_ora = ts.replace(minute=0, second=0, microsecond=0)
-        ore.add(inizio_ora)
-        bucket[fascia(ts)][inizio_ora] += kwh
-
-    ore_ordinate = sorted(ore)
-    return {f: [(ora, bucket[f].get(ora, 0.0)) for ora in ore_ordinate] for f in FASCE}
+        bucket[inizio_ora] += kwh
+    return classifica_ore(sorted(bucket.items()))

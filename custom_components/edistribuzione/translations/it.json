@@ -72,6 +72,7 @@
       "browser_token_mancanti": "Nell'indirizzo incollato mancano dei dati ({messaggio}): probabilmente è stato copiato solo in parte. Copialo per intero, fino alla fine della riga."
     },
     "abort": {
+      "already_configured": "Questo account E-Distribuzione è già configurato. Per aggiungere altri POD usa le opzioni dell'integrazione.",
       "reauth_successful": "Credenziali aggiornate con successo",
       "no_pods_found": "Nessun POD trovato per questo account",
       "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova la configurazione da capo (login + OTP inclusi).",
@@ -89,7 +90,8 @@
           "tipo_pod": "Tipo di contatore per POD",
           "aggiungi_pod": "Aggiungi POD",
           "rimuovi_pod": "Rimuovi POD",
-          "orario": "Orario della richiesta"
+          "orario": "Orario della richiesta",
+          "energia_reattiva": "Energia reattiva e fattore di potenza"
         }
       },
       "tipo_pod": {
@@ -116,6 +118,13 @@
         "data": {
           "ora_richiesta": "Ora"
         }
+      },
+      "energia_reattiva": {
+        "title": "Energia reattiva e fattore di potenza",
+        "description": "Abilita la lettura mensile dell'energia reattiva nei 4 quadranti (R1-R4, kvarh) e il calcolo del fattore di potenza medio mensile (cos phi). Utile per impianti con inverter o forniture superiori a 16,5 kW; disattivata di default per ridurre le chiamate API.",
+        "data": {
+          "energia_reattiva": "Abilita sensori energia reattiva e cos phi"
+        }
       }
     },
     "error": {
@@ -133,6 +142,22 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "problema_accesso": {
+        "name": "Problema accesso",
+        "state_attributes": {
+          "host_ultimo_accesso": {
+            "name": "Host ultimo accesso"
+          },
+          "ultimo_rinnovo": {
+            "name": "Ultimo rinnovo"
+          },
+          "ultimo_errore": {
+            "name": "Ultimo errore"
+          }
+        }
+      }
+    },
     "sensor": {
       "pod_configurati": {
         "name": "POD configurati",
@@ -197,6 +222,335 @@
             "name": "Giorno"
           }
         }
+      },
+      "potenza_contrattuale": {
+        "name": "Potenza contrattuale",
+        "state_attributes": {
+          "tensione": {
+            "name": "Livello tensione"
+          },
+          "stato_fornitura": {
+            "name": "Stato fornitura"
+          },
+          "tipo_punto": {
+            "name": "Tipo punto di misura"
+          },
+          "ha_impianto": {
+            "name": "Impianto di produzione"
+          },
+          "regime_impianto": {
+            "name": "Regime impianto"
+          }
+        }
+      },
+      "potenza_disponibile": {
+        "name": "Potenza disponibile",
+        "state_attributes": {
+          "potenza_prelevabile": {
+            "name": "Potenza prelevabile"
+          }
+        }
+      },
+      "picco_potenza_ultimo_giorno": {
+        "name": "Picco potenza ultimo giorno",
+        "state_attributes": {
+          "giorno": {
+            "name": "Giorno"
+          },
+          "ora_picco": {
+            "name": "Ora picco"
+          },
+          "pct_potenza_contrattuale": {
+            "name": "% potenza contrattuale"
+          },
+          "pct_potenza_disponibile": {
+            "name": "% potenza disponibile"
+          }
+        }
+      },
+      "picco_potenza_mese_corrente": {
+        "name": "Picco potenza mese corrente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1_kw": {
+            "name": "Picco F1 (kW)"
+          },
+          "f2_kw": {
+            "name": "Picco F2 (kW)"
+          },
+          "f3_kw": {
+            "name": "Picco F3 (kW)"
+          },
+          "pct_potenza_contrattuale": {
+            "name": "% potenza contrattuale"
+          },
+          "pct_potenza_disponibile": {
+            "name": "% potenza disponibile"
+          }
+        }
+      },
+      "picco_potenza_mese_precedente": {
+        "name": "Picco potenza mese precedente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1_kw": {
+            "name": "Picco F1 (kW)"
+          },
+          "f2_kw": {
+            "name": "Picco F2 (kW)"
+          },
+          "f3_kw": {
+            "name": "Picco F3 (kW)"
+          },
+          "pct_potenza_contrattuale": {
+            "name": "% potenza contrattuale"
+          },
+          "pct_potenza_disponibile": {
+            "name": "% potenza disponibile"
+          }
+        }
+      },
+      "prelievo_mese_corrente": {
+        "name": "Prelievo mese corrente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "immissione_mese_corrente": {
+        "name": "Immissione mese corrente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "produzione_mese_corrente": {
+        "name": "Produzione mese corrente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "prelievo_tecnico_mese_corrente": {
+        "name": "Prelievo (tecnico) mese corrente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "prelievo_mese_precedente": {
+        "name": "Prelievo mese precedente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "immissione_mese_precedente": {
+        "name": "Immissione mese precedente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "produzione_mese_precedente": {
+        "name": "Produzione mese precedente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "prelievo_tecnico_mese_precedente": {
+        "name": "Prelievo (tecnico) mese precedente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "f1": {
+            "name": "F1 (kWh)"
+          },
+          "f2": {
+            "name": "F2 (kWh)"
+          },
+          "f3": {
+            "name": "F3 (kWh)"
+          }
+        }
+      },
+      "ultima_lettura_ufficiale": {
+        "name": "Ultima lettura ufficiale",
+        "state_attributes": {
+          "tipo_flusso": {
+            "name": "Tipo flusso"
+          },
+          "tipo_misura": {
+            "name": "Tipo misura"
+          },
+          "pubblicata_il": {
+            "name": "Pubblicata il"
+          },
+          "ea_f1": {
+            "name": "Registro EA F1 (kWh)"
+          },
+          "ea_f2": {
+            "name": "Registro EA F2 (kWh)"
+          },
+          "ea_f3": {
+            "name": "Registro EA F3 (kWh)"
+          },
+          "ea_totale": {
+            "name": "Registro EA totale (kWh)"
+          },
+          "er_f1": {
+            "name": "Registro ER F1 (kvarh)"
+          },
+          "er_f2": {
+            "name": "Registro ER F2 (kvarh)"
+          },
+          "er_f3": {
+            "name": "Registro ER F3 (kvarh)"
+          },
+          "er_totale": {
+            "name": "Registro ER totale (kvarh)"
+          },
+          "pot_f1": {
+            "name": "Potenza F1 (kW)"
+          },
+          "pot_f2": {
+            "name": "Potenza F2 (kW)"
+          },
+          "pot_f3": {
+            "name": "Potenza F3 (kW)"
+          },
+          "pot_massima": {
+            "name": "Potenza massima (kW)"
+          }
+        }
+      },
+      "energia_reattiva_mese_corrente": {
+        "name": "Energia reattiva mese corrente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "reattiva_immessa": {
+            "name": "Reattiva immessa (kvarh)"
+          },
+          "r1": {
+            "name": "R1 induttiva prelevata (kvarh)"
+          },
+          "r2": {
+            "name": "R2 capacitiva immessa (kvarh)"
+          },
+          "r3": {
+            "name": "R3 induttiva immessa (kvarh)"
+          },
+          "r4": {
+            "name": "R4 capacitiva prelevata (kvarh)"
+          },
+          "mese_precedente": {
+            "name": "Mese precedente"
+          },
+          "mese_precedente_prelevata": {
+            "name": "Mese precedente prelevata (kvarh)"
+          },
+          "mese_precedente_immessa": {
+            "name": "Mese precedente immessa (kvarh)"
+          }
+        }
+      },
+      "fattore_potenza_mese_corrente": {
+        "name": "Fattore di potenza mese corrente",
+        "state_attributes": {
+          "mese": {
+            "name": "Mese"
+          },
+          "tan_phi": {
+            "name": "tan phi"
+          },
+          "mese_precedente": {
+            "name": "Mese precedente"
+          },
+          "mese_precedente_cos_phi": {
+            "name": "cos phi mese precedente"
+          },
+          "mese_precedente_tan_phi": {
+            "name": "tan phi mese precedente"
+          }
+        }
       }
     }
   },
@@ -211,7 +565,7 @@
   "services": {
     "recupera_storico": {
       "name": "Recupera storico",
-      "description": "Richiede a E-Distribuzione entrambe le direzioni dell'energia (prelevata e immessa) per un periodo passato e le importa, con una sola richiesta per direzione per l'intero periodo (confermato funzionante fino a 181 giorni in un'unica risposta). Il recupero dello storico non è automatico: sei tu a decidere quando e quanto recuperare. Per periodi più lunghi ripeti l'azione su intervalli consecutivi.",
+      "description": "Richiede a E-Distribuzione entrambe le direzioni dell'energia (prelevata e immessa) per un periodo passato e le importa (fino a 365 giorni per esecuzione). Il recupero dello storico non è automatico: sei tu a decidere quando e quanto recuperare. Per periodi più lunghi ripeti l'azione su intervalli consecutivi.",
       "fields": {
         "device_id": {
           "name": "Configurazione / POD",
@@ -252,7 +606,7 @@
       "message": "La data di fine ({data_a}) è troppo recente: E-Distribuzione pubblica i dati con un giorno di ritardo, quindi oggi puoi arrivare al massimo al {ultimo_utile}. Usa data_a: \"{ultimo_utile}\"."
     },
     "intervallo_troppo_ampio": {
-      "message": "Il periodo dal {data_da} al {data_a} è di {giorni} giorni: una singola esecuzione ne copre al massimo {massimo} (circa 6 mesi). Dividilo in più esecuzioni, la prima ad esempio dal {data_da} al {fine_prima_parte}."
+      "message": "Il periodo dal {data_da} al {data_a} è di {giorni} giorni: una singola esecuzione ne copre al massimo {massimo} (1 anno). Dividilo in più esecuzioni, la prima ad esempio dal {data_da} al {fine_prima_parte}."
     },
     "nessun_dato_importato": {
       "message": "Nessun dato importato per il periodo {data_da} - {data_a}. {dettagli}"

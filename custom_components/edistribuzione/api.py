@@ -1,8 +1,7 @@
 """Client for the E-Distribuzione data API (xs-misura-p.de-c1.eu1.cloudhub.io).
 
-Unlike auth.py, this is a plain REST/JSON API behind a Bearer token. The only
-quirk is the `Method_User` header, which the backend uses to pick permissions
-per endpoint.
+Plain REST/JSON API behind a Bearer token; the Method_User header selects
+per-endpoint permissions.
 """
 from __future__ import annotations
 
@@ -13,6 +12,8 @@ from typing import Any
 import aiohttp
 
 from .const import (
+    HTTP_CONNECT_TIMEOUT_SECONDS,
+    HTTP_TIMEOUT_SECONDS,
     MAGNITUDE_PRELEVATA,
     METHOD_USER_CURVA_GIORNO,
     METHOD_USER_CURVA_MESE,
@@ -25,16 +26,34 @@ from .const import (
     MISURE_MONTHLY_TIME_OF_USE_URL,
     MISURE_READING_URL,
 )
+from .redaction import redact_params, redact_preview, redact_url
 
 _LOGGER = logging.getLogger(__name__)
+
+DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
+    total=HTTP_TIMEOUT_SECONDS,
+    connect=HTTP_CONNECT_TIMEOUT_SECONDS,
+)
+
+# Markers of a gateway/routing 404 page rather than a MuleSoft "no data yet" reply.
+_HTML_404_MARKERS = ("<html", "<!doctype", "cannot get ", "not found</title>")
+
+
+def _is_routing_404(body: str) -> bool:
+    lowered = body.lstrip().lower()
+    return any(marker in lowered for marker in _HTML_404_MARKERS)
+
+
+def _extract_data_list(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = payload.get("data")
+    return data if isinstance(data, list) else []
 
 
 class ApiError(Exception):
     """Raised when the API returns a non-OK meta.status or a transport error.
 
     'status' is the HTTP status when the server answered with an error, 'rete'
-    is True when it could not be reached at all: the coordinator turns them
-    into a sentence the user can act on.
+    is True when it could not be reached at all.
     """
 
     def __init__(self, message: str, *, status: int | None = None, rete: bool = False) -> None:
@@ -44,100 +63,153 @@ class ApiError(Exception):
 
 
 class ApiClient:
-    """Thin wrapper over the 'misure' endpoints. Auth and refresh are handled
-    upstream by the coordinator, which passes a valid access_token here."""
+    """Thin wrapper over the 'misure' endpoints. Auth and refresh live in the coordinator."""
 
-    def __init__(self, session: aiohttp.ClientSession, access_token: str) -> None:
+    def __init__(
+        self,
+        session: aiohttp.ClientSession,
+        access_token: str,
+        *,
+        timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT,
+    ) -> None:
         self._session = session
         self._access_token = access_token
+        self._timeout = timeout
 
     def update_token(self, access_token: str) -> None:
         self._access_token = access_token
+
+    @property
+    def has_token(self) -> bool:
+        """True when a non-empty Bearer access token is loaded."""
+        return bool(self._access_token)
 
     def _headers(self, method_user: str) -> dict[str, str]:
         return {
             "Authorization": f"Bearer {self._access_token}",
             "Method_User": method_user,
             "Accept": "*/*",
-            # A generic User-Agent is fine: the backend keys permissions on the
-            # Method_User header, not on the UA string.
             "User-Agent": "HomeAssistant-edistribuzione",
             "client_id": "",
             "client_secret": "",
         }
 
-    async def _get_json(self, url: str, method_user: str, params: dict) -> dict:
+    async def _request_json(
+        self,
+        method: str,
+        url: str,
+        method_user: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        allow_empty_404: bool = False,
+    ) -> dict[str, Any]:
+        safe_url = redact_url(url)
         try:
-            return await self._get_json_grezzo(url, method_user, params)
+            return await self._request_json_raw(
+                method,
+                url,
+                method_user,
+                params=params,
+                json_body=json_body,
+                allow_empty_404=allow_empty_404,
+            )
         except (aiohttp.ClientError, TimeoutError) as err:
-            raise ApiError(f"{type(err).__name__} chiamando {url}: {err}", rete=True) from err
+            raise ApiError(f"{type(err).__name__} chiamando {safe_url}", rete=True) from err
         except ValueError as err:
-            raise ApiError(f"Risposta non JSON da {url}: {err}") from err
+            raise ApiError(f"Risposta non JSON da {safe_url}: {err}") from err
 
-    async def _get_json_grezzo(self, url: str, method_user: str, params: dict) -> dict:
-        async with self._session.get(
-            url, headers=self._headers(method_user), params=params
-        ) as resp:
-            _LOGGER.debug("GET %s (%s) %s: HTTP %s", url, method_user, params, resp.status)
+    async def _request_json_raw(
+        self,
+        method: str,
+        url: str,
+        method_user: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: dict[str, Any] | None = None,
+        allow_empty_404: bool = False,
+    ) -> dict[str, Any]:
+        safe_url = redact_url(url)
+        headers = self._headers(method_user)
+        if method == "GET":
+            ctx = self._session.get(url, headers=headers, params=params, timeout=self._timeout)
+        else:
+            ctx = self._session.post(url, headers=headers, json=json_body, timeout=self._timeout)
+
+        async with ctx as resp:
+            _LOGGER.debug(
+                "%s %s (%s) %s: HTTP %s",
+                method,
+                safe_url,
+                method_user,
+                redact_params(params) if params else {},
+                resp.status,
+            )
             if resp.status == 401:
                 raise ApiError("401 Unauthorized - access_token scaduto", status=401)
-            if resp.status == 404:
-                # The backend returns 404 for a day whose data is not published
-                # yet, instead of a 200 with an empty data:[] as for other
-                # empty requests. Treated as "no data available yet" (same
-                # meaning as empty data:[]), not as a fatal error.
+            if resp.status == 404 and allow_empty_404:
                 body_preview = await resp.text()
+                if _is_routing_404(body_preview):
+                    _LOGGER.error(
+                        "%s ha risposto 404 HTML (endpoint cambiato?). Anteprima: %r",
+                        safe_url,
+                        redact_preview(body_preview, 200),
+                    )
+                    raise ApiError(f"HTTP 404 da {safe_url}", status=404)
+                # Backend uses 404 when a day's data is not published yet.
                 _LOGGER.debug(
-                    "404 su %s (probabile 'nessun dato ancora disponibile', non "
-                    "un errore). Corpo (primi 300 caratteri): %r",
-                    url,
-                    body_preview[:300],
+                    "404 su %s (nessun dato disponibile). Anteprima: %r",
+                    safe_url,
+                    redact_preview(body_preview, 200),
                 )
                 return {"data": []}
             if resp.status >= 400:
                 body_preview = await resp.text()
                 _LOGGER.error(
-                    "%s ha risposto %s. Corpo (primi 500 caratteri): %r",
-                    url,
+                    "%s ha risposto %s. Anteprima: %r",
+                    safe_url,
                     resp.status,
-                    body_preview[:500],
+                    redact_preview(body_preview, 300),
                 )
-                raise ApiError(f"HTTP {resp.status} da {url}", status=resp.status)
+                raise ApiError(f"HTTP {resp.status} da {safe_url}", status=resp.status)
             payload = await resp.json(content_type=None)
 
-        meta = payload.get("meta", {})
-        if meta.get("status") not in ("OK", None):
-            raise ApiError(f"API returned meta.status={meta.get('status')}: {meta}")
+        if not isinstance(payload, dict):
+            raise ApiError(f"Risposta JSON inattesa da {safe_url} ({type(payload).__name__})")
+
+        meta = payload.get("meta")
+        if isinstance(meta, dict):
+            status = meta.get("status")
+            if status not in ("OK", None):
+                detail = meta.get("message") or meta.get("errorDescription") or ""
+                safe_detail = redact_preview(str(detail), 200) if detail else ""
+                suffix = f": {safe_detail}" if safe_detail else ""
+                raise ApiError(f"API returned meta.status={status}{suffix}")
         return payload
+
+    async def _get_json(self, url: str, method_user: str, params: dict[str, Any]) -> dict[str, Any]:
+        return await self._request_json(
+            "GET", url, method_user, params=params, allow_empty_404=True
+        )
 
     async def async_get_supplies(self) -> list[dict[str, Any]]:
         """List of PODs (delivery points) tied to the account."""
-        # json={} instead of manual headers with no body: the backend is
-        # MuleSoft (cloudhub.io), and with a declared Content-Type but no body
-        # the server-side parser fails silently with a generic 500 instead of
-        # a precise validation error.
-        async with self._session.post(
-            MISURE_GET_SUPPLIES_URL,
-            headers=self._headers(METHOD_USER_ELENCO_POD),
-            json={},
-        ) as resp:
-            if resp.status >= 400:
-                body_preview = await resp.text()
-                _LOGGER.error(
-                    "getSupplies ha risposto %s. Corpo (primi 500 caratteri): %r",
-                    resp.status,
-                    body_preview[:500],
-                )
-            resp.raise_for_status()
-            payload = await resp.json(content_type=None)
+        # Send json={} so MuleSoft always receives a valid JSON body.
+        payload = await self._request_json(
+            "POST", MISURE_GET_SUPPLIES_URL, METHOD_USER_ELENCO_POD, json_body={}
+        )
         try:
             pods = payload["data"][0]["pods"]
-        except (KeyError, IndexError):
+            if not isinstance(pods, list):
+                pods = []
+        except (KeyError, IndexError, TypeError):
             pods = []
         _LOGGER.debug("getSupplies: %d POD sull'account", len(pods))
         return pods
 
-    async def async_get_reading(self, pod: str, date_from: date, date_to: date) -> list[dict[str, Any]]:
+    async def async_get_reading(
+        self, pod: str, date_from: date, date_to: date
+    ) -> list[dict[str, Any]]:
         """Official cumulative monthly readings (EA/ER per band + POT peaks)."""
         params = {
             "pointofdelivery": pod,
@@ -145,7 +217,7 @@ class ApiClient:
             "rangeDateTo": date_to.isoformat(),
         }
         payload = await self._get_json(MISURE_READING_URL, METHOD_USER_LETTURE, params)
-        return payload.get("data", [])
+        return _extract_data_list(payload)
 
     async def async_get_daily_load_profile(
         self,
@@ -154,16 +226,7 @@ class ApiClient:
         date_to: date | None = None,
         magnitude: str = MAGNITUDE_PRELEVATA,
     ) -> list[dict[str, Any]]:
-        """Hourly/quarter-hourly load curve.
-
-        If date_to is None, requests a single day (date_from == date_to in the
-        request). The endpoint accepts rangeDateFrom/rangeDateTo as a real
-        range, up to 181 days in a single response.
-
-        'magnitude' selects the energy direction (see MAGNITUDE_* in const.py):
-        the caller decides which one(s) to request, this function assumes
-        nothing beyond the consumption default.
-        """
+        """Quarter-hourly load curve over [date_from, date_to] for one magnitude."""
         if date_to is None:
             date_to = date_from
         params = {
@@ -175,16 +238,16 @@ class ApiClient:
         payload = await self._get_json(
             MISURE_DAILY_LOAD_PROFILE_URL, METHOD_USER_CURVA_GIORNO, params
         )
-        return payload.get("data", [])
+        return _extract_data_list(payload)
 
     async def async_get_monthly_load_profile(
         self,
+        pod: str,
         date_from: date,
         date_to: date,
-        pod: str,
         magnitude: str = MAGNITUDE_PRELEVATA,
     ) -> list[dict[str, Any]]:
-        """Total consumption per day over a range."""
+        """Total energy per day over a range."""
         params = {
             "pointofdelivery": pod,
             "rangeDateFrom": date_from.isoformat(),
@@ -194,7 +257,7 @@ class ApiClient:
         payload = await self._get_json(
             MISURE_MONTHLY_LOAD_PROFILE_URL, METHOD_USER_CURVA_MESE, params
         )
-        return payload.get("data", [])
+        return _extract_data_list(payload)
 
     async def async_get_monthly_time_of_use(
         self,
@@ -213,4 +276,4 @@ class ApiClient:
         payload = await self._get_json(
             MISURE_MONTHLY_TIME_OF_USE_URL, METHOD_USER_CURVA_PERIODO, params
         )
-        return payload.get("data", [])
+        return _extract_data_list(payload)

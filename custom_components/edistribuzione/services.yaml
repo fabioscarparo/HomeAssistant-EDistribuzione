@@ -1,49 +1,43 @@
 recupera_storico:
-  name: Recupera storico
+  name: Fetch history
   description: >-
-    Richiede a E-Distribuzione entrambe le direzioni dell'energia (prelevata
-    e immessa) per un periodo passato e le importa, con una sola richiesta
-    per direzione per l'intero periodo (confermato funzionante fino a 181
-    giorni in un'unica risposta). Il recupero dello storico non è
-    automatico: sei tu a decidere quando e quanto recuperare.
-    Per periodi più lunghi ripeti l'azione su intervalli consecutivi.
+    Requests both energy directions (consumption and injection) for a past
+    period from E-Distribuzione and imports them (up to 365 days per run).
+    History is not fetched automatically: repeat the action over consecutive
+    ranges for longer periods.
   fields:
     device_id:
-      name: Configurazione / POD
+      name: Setup / POD
       description: >-
-        Scegli il dispositivo per cui recuperare lo storico. Il dispositivo
-        "E-Distribuzione" (account) recupera tutti i POD della
-        configurazione insieme; il dispositivo di un singolo POD limita il
-        recupero solo a quello.
+        Choose the device to fetch history for. The "E-Distribuzione" account
+        device fetches all PODs of the setup; a single POD device limits the
+        fetch to that POD.
       required: true
       selector:
         device:
           filter:
             integration: edistribuzione
     data_da:
-      name: Data inizio
+      name: Start date
       description: >-
-        Primo giorno del periodo da recuperare, come anno-mese-giorno (ad
-        esempio 2026-08-01).
+        First day of the period to fetch, as YYYY-MM-DD (for example 2026-08-01).
       required: true
       example: "2026-08-01"
       selector:
         date:
     data_a:
-      name: Data fine
+      name: End date
       description: >-
-        Ultimo giorno del periodo da recuperare, come anno-mese-giorno. I dati
-        sono disponibili con un giorno di ritardo, quindi al massimo ieri.
+        Last day of the period to fetch, as YYYY-MM-DD. Data is published with a
+        one-day delay, so yesterday at the latest.
       required: true
       example: "2026-08-31"
       selector:
         date:
 
 configura_energy_dashboard:
-  name: Configura Energy Dashboard
+  name: Configure Energy Dashboard
   description: >-
-    Aggiunge alla Energy Dashboard le statistiche di tutti i POD configurati,
-    in base al ruolo assegnato a ciascuno (scambio -> sorgente rete,
-    produzione -> sorgente solare). Azione idempotente: non sovrascrive né
-    duplica sorgenti già presenti (incluse quelle configurate a mano), sicura
-    da rilanciare dopo aver aggiunto un POD o cambiato un ruolo.
+    Adds the statistics of all configured PODs to the Energy Dashboard based on
+    each POD's role (exchange -> grid source, production -> solar source).
+    Idempotent: does not overwrite or duplicate existing sources.

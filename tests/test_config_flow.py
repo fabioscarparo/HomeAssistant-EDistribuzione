@@ -228,16 +228,16 @@ async def test_login_bloccato_dalla_verifica_antibot(hass, edist_mocks):
 
 
 async def test_convalida_otp_bloccata_dalla_verifica_antibot(hass, edist_mocks):
-    """The OTP is single-use: with access blocked the flow stops with a clear
-    reason, as for the other errors after validation."""
+    """When anti-bot triggers during OTP validation, offer browser login."""
     edist_mocks.auth.async_submit_otp.side_effect = AccessoBloccato("antibot")
     res = await _fino_a_user(hass)
     res = await hass.config_entries.flow.async_configure(
         res["flow_id"], {"email": "a@b.it", "password": "x"}
     )
     res = await hass.config_entries.flow.async_configure(res["flow_id"], {"otp": "12345"})
-    assert res["type"] == FlowResultType.ABORT
-    assert res["reason"] == "accesso_bloccato"
+    assert res["type"] == FlowResultType.MENU
+    assert res["step_id"] == "antibot"
+    assert set(res["menu_options"]) == {"browser_login", "riprova_login"}
 
 
 async def _login_con_errore(hass, edist_mocks, errore):
@@ -547,7 +547,13 @@ async def test_opzioni_menu(hass):
     entry = _entry_edist(hass)
     res = await hass.config_entries.options.async_init(entry.entry_id)
     assert res["type"] == FlowResultType.MENU
-    assert set(res["menu_options"]) == {"tipo_pod", "aggiungi_pod", "rimuovi_pod", "orario"}
+    assert set(res["menu_options"]) == {
+        "tipo_pod",
+        "aggiungi_pod",
+        "rimuovi_pod",
+        "orario",
+        "energia_reattiva",
+    }
 
 
 async def test_opzioni_orario_salva_valore(hass):

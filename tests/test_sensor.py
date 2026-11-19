@@ -119,7 +119,7 @@ def test_modello_dispositivo_segue_la_lingua_del_server(lingua, account, pod):
     assert s.UltimaDataDisponibileSensor(coord, _entry(), POD).device_info["model"] == pod
 
 
-async def test_build_entities_conta_account_piu_tre_per_pod(hass):
+async def test_build_entities_conta_account_piu_tredici_per_pod(hass):
     entry = _entry(hass, pods=[POD, "IT002"])
     coord = SimpleNamespace(
         data=None,
@@ -127,11 +127,11 @@ async def test_build_entities_conta_account_piu_tre_per_pod(hass):
         entry=entry,
         tipo_pod=lambda pod: TIPO_POD_DEFAULT,
         lingua="it",
+        energia_reattiva_attiva=False,
     )
     entità = s.build_entities(hass, coord)
-    # 2 on the account (configured PODs, current time band) + 3 for each of
-    # the 2 PODs (last date + consumption + injection)
-    assert len(entità) == 2 + 3 * 2
+    # 2 on the account + 13 per POD (reactive opt-in disabled by default)
+    assert len(entità) == 2 + 13 * 2
     assert {"PodConfiguratiSensor", "FasciaCorrenteSensor"} <= {type(e).__name__ for e in entità}
 
 

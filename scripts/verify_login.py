@@ -5,11 +5,8 @@ attempt.
 Covers the whole chain: email/password -> OTP -> POD retrieval
 (async_get_supplies), the same path as the real config flow.
 
-It also PROBES the 'magnitude' vocabulary of querydailyloadprofile: the
-production code requests "A1" (consumption, confirmed) and "A2" (injection, NOT
-confirmed - see const.py). This script tries several candidates and compares the
-results, to establish which value actually returns injected energy before
-trusting it in production.
+It also probes the 'magnitude' vocabulary of querydailyloadprofile ("A1" for
+consumption, "A2" for injection) and compares the results with official readings.
 
 After a successful login it saves the refresh_token to refresh_token.txt (local
 file, excluded from git): on the next run the script offers to test ONLY the
@@ -33,6 +30,7 @@ import getpass
 import importlib.util
 import json
 import logging
+import os
 import sys
 import types
 from datetime import date, datetime, timedelta
@@ -244,6 +242,14 @@ async def _sonda_magnitude(api_client, pod: str, giorno_da: date, giorno_a: date
     return curve
 
 
+def _save_secret_file(path: Path, content: str) -> None:
+    """Write a secret token file with owner-only permissions (0600)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    os.chmod(path, 0o600)
+
+
 async def _test_refresh_soltanto(auth) -> None:
     """Test async_refresh_access_token with the token saved from a previous
     login, without redoing email/password/OTP."""
@@ -269,15 +275,15 @@ async def _test_refresh_soltanto(auth) -> None:
             raise
 
         print("\n=== REFRESH RIUSCITO ===")
-        print(f"access_token  (primi 20 char): {tokens.access_token[:20]}...")
+        print(f"access_token ricevuto (lunghezza {len(tokens.access_token)})")
         if tokens.refresh_token == refresh_token_salvato:
             print("refresh_token: invariato rispetto a quello salvato")
         else:
             print(
-                f"refresh_token: CAMBIATO (primi 20 char nuovo: {tokens.refresh_token[:20]}...) "
+                f"refresh_token: CAMBIATO (lunghezza {len(tokens.refresh_token)}) "
                 "- salvo il nuovo al posto del vecchio"
             )
-            REFRESH_TOKEN_FILE.write_text(tokens.refresh_token, encoding="utf-8")
+            _save_secret_file(REFRESH_TOKEN_FILE, tokens.refresh_token)
 
 
 async def main() -> None:
@@ -375,10 +381,10 @@ async def main() -> None:
             raise
 
         print("\n=== LOGIN COMPLETO RIUSCITO ===")
-        print(f"access_token  (primi 20 char): {tokens.access_token[:20]}...")
-        print(f"refresh_token (primi 20 char): {tokens.refresh_token[:20]}...")
+        print(f"access_token ricevuto (lunghezza {len(tokens.access_token)})")
+        print(f"refresh_token ricevuto (lunghezza {len(tokens.refresh_token)})")
 
-        REFRESH_TOKEN_FILE.write_text(tokens.refresh_token, encoding="utf-8")
+        _save_secret_file(REFRESH_TOKEN_FILE, tokens.refresh_token)
         print(
             f"\nrefresh_token salvato in {REFRESH_TOKEN_FILE.resolve()} - la prossima volta "
             "puoi testarlo direttamente senza rifare login+OTP (file locale, già escluso "

@@ -1,10 +1,4 @@
-"""Fix for the Repairs notices about a blocked access.
-
-When E-Distribuzione blocks the token refresh, the integration keeps retrying
-once an hour, but the user can also sign in again: a login in the browser gets
-past the block and gives a working access token at once. The notice's "Fix"
-button confirms and starts the reauth of every setup whose access is blocked.
-"""
+"""Fix flow for blocked-access Repairs notices."""
 from __future__ import annotations
 
 import logging
@@ -19,7 +13,11 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class RiaccessoRepairFlow(RepairsFlow):
-    """Confirm, then start the reauth (browser or password and OTP)."""
+    """Confirm and start reauth for the affected config entry (or all blocked ones)."""
+
+    def __init__(self, entry_id: str | None = None) -> None:
+        super().__init__()
+        self._entry_id = entry_id
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> RepairsFlowResult:
         return await self.async_step_confirm()
@@ -29,6 +27,13 @@ class RiaccessoRepairFlow(RepairsFlow):
     ) -> RepairsFlowResult:
         if user_input is None:
             return self.async_show_form(step_id="confirm")
+
+        if self._entry_id:
+            entry = self.hass.config_entries.async_get_entry(self._entry_id)
+            if entry is not None:
+                _LOGGER.info("Riparazione: avvio la riautenticazione di %s", entry.entry_id)
+                entry.async_start_reauth(self.hass)
+            return self.async_create_entry(data={})
 
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             coordinator = self.hass.data.get(DOMAIN, {}).get(entry.entry_id)
@@ -41,5 +46,6 @@ class RiaccessoRepairFlow(RepairsFlow):
 async def async_create_fix_flow(
     hass: HomeAssistant, issue_id: str, data: dict[str, Any] | None
 ) -> RepairsFlow:
-    """Both blocked-access notices have the same fix."""
-    return RiaccessoRepairFlow()
+    """Create the fix flow scoped to the issue's config entry when available."""
+    entry_id = data.get("entry_id") if isinstance(data, dict) else None
+    return RiaccessoRepairFlow(entry_id=entry_id)

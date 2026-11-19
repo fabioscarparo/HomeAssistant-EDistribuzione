@@ -9,25 +9,28 @@ src = ["custom_components", "scripts", "tests"]
 
 [tool.ruff.lint]
 select = [
-    "E",    # pycodestyle
-    "W",    # pycodestyle
-    "F",    # pyflakes
-    "I",    # isort
-    "UP",   # pyupgrade
-    "B",    # flake8-bugbear
-    "C4",   # flake8-comprehensions
-    "SIM",  # flake8-simplify
+    "E",     # pycodestyle
+    "W",     # pycodestyle
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "ASYNC", # flake8-async
+    "G",     # flake8-logging-format
+    "LOG",   # flake8-logging
+    "PERF",  # perflint
 ]
 ignore = [
-    # Comments (often quoting real API messages) regularly go past 100
-    # columns. The actual code stays below.
+    # Comments quoting API messages may exceed 100 columns.
     "E501",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# The tests deliberately build classes/fixtures with "unnatural" names and
-# structures to simulate the API responses.
-"tests/**" = ["B011", "SIM"]
+"tests/**" = ["B011", "SIM", "PERF"]
+# Standalone interactive CLI script.
+"scripts/**" = ["ASYNC240", "ASYNC250"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["custom_components"]
