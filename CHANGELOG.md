@@ -1,79 +1,90 @@
 # Changelog
 
-## 1.0.0-beta.2
-### Removed
-- **Breaking change**: removed the redundant energy summary sensors per POD (`Last day
-  consumption/injection/production` from `0.8.9` and `Current/previous month
-  consumption/injection/production` from `1.0.0-beta.1`), as day/week/month/year energy and
-  F1/F2/F3 totals are already exposed via external statistics, the POD card and the Energy
-  Dashboard. Obsolete entity registry entries are removed automatically on startup (as well as
-  opt-in reactive sensors when disabled).
+## 1.0.0
 
-### Changed
-- **POD entity categories**: only **Last available date** and **Latest official reading** remain
-  under **Diagnostic**; **Contractual power**, **Available power**, **Last day peak power**,
-  **Current month peak power**, **Previous month peak power**, and the opt-in reactive sensors are
-  now primary **Sensors**.
+First major release, bringing peak power monitoring, supply metadata, official billing readings,
+optional reactive energy, 1-year history fetches, faster incremental imports, Home Assistant
+2026.x compatibility, and broad reliability and privacy improvements.
 
-### Fixed
-- Added `CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)` to silence the Hassfest
-  schema warning, and updated GitHub Actions CI to `actions/setup-python@v6`.
+### Breaking changes
+- **Removed per-POD daily energy summary sensors**: `Last day consumption`, `Last day return to
+  grid`, `Last day production`, and `Last day consumption (technical)` have been removed. Daily,
+  weekly, monthly, and yearly energy totals (including F1/F2/F3 time bands) are already provided
+  by the Energy Dashboard, the POD card, and external statistics. Obsolete entities are removed
+  automatically from Home Assistant on startup (including the temporary monthly energy sensors if
+  you tested `1.0.0-beta.1`). If you used any of these sensors in automations or dashboards,
+  switch to the POD card, the Energy Dashboard, or the external statistics.
 
-## 1.0.0-beta.1
 ### Added
-- **Supply metadata & automatic M1/M2 detection**: reads technical supply details from
-  `getSupplies` (`ContractualPower`, `AvailablePower`, `DeductiblePower`, `VoltageLevel`,
-  `SupplyStatusId`, `MeteringPointType`, `HasPlant`, `IncentivizedPlant`) to expose
-  **Contractual power** and **Available power** diagnostic sensors per POD and pre-select
-  exchange (`M1`) vs production (`M2`) meter roles during setup.
-- **Peak power & official monthly totals**:
-  - **Last day peak power** (`kW`) computed locally from 15-minute SQLite samples (zero extra API
-    calls), with peak time and percentage of contractual/available power.
-  - **Current month** and **Previous month** energy (`kWh`, with official F1/F2/F3 breakdown) and
-    **peak power** (`kW`, with per-band peaks and threshold percentages) via
-    `querymonthlytimeofuse`.
-- **Latest official billing reading**: monthly diagnostic sensor per POD via `/xs/misure/reading`
-  with date, flow type (e.g. `PDO2G_R`), reading type (`E`/`S`), `EA`/`ER` registers and `POT`
-  peaks.
-- **Opt-in reactive energy & power factor**: enable in **Configure -> Reactive energy and power
-  factor** to track monthly four-quadrant reactive energy (`R1`-`R4`, `kvarh`) and withdrawal
-  power factor (`cos phi`, `tan phi`).
-- **Access problem diagnostic binary sensor** on the account device for automations and alerts.
-- **Fetch history up to 365 days** per run (with safe internal 180-day chunking) and optional
-  structured response data (`SupportsResponse.OPTIONAL`).
-- **Expanded diagnostics**: local SQLite stats, Recorder series status, Energy Dashboard status,
-  Lovelace card status, token origin/timestamp, next-poll state, 15-event ring buffer, and
-  automatic **ARERA band reconciliation** comparing local F1/F2/F3 sums against official monthly
-  totals.
-- Automated `ruff` linting and `pytest` execution in GitHub Actions CI.
+- **Peak power sensors (kW)**: three new primary sensors per POD monitor your 15-minute power
+  peaks:
+  - **Last day peak power**: calculated locally from the 15-minute data (no extra requests to
+    E-Distribuzione), including peak time and percentage of contractual and available power.
+  - **Current month peak power** and **Previous month peak power**: official monthly 15-minute
+    peaks from E-Distribuzione, with per-band peaks (`F1`, `F2`, `F3`) and percentage of
+    contractual and available power.
+- **Supply details and automatic meter type detection**: two new primary sensors per POD expose
+  **Contractual power** (with voltage level, supply status, metering point type, and generation
+  plant details in attributes) and **Available power** (with deductible power). During initial
+  setup, each POD's role (exchange meter `M1` vs solar production meter `M2`) is now pre-selected
+  automatically.
+- **Latest official billing reading**: new diagnostic sensor per POD (**Latest official reading**)
+  showing the date of E-Distribuzione's most recent official reading, with flow type, reading
+  type, active/reactive registers (`EA`/`ER` per F1/F2/F3), and monthly power peaks (`POT`) in
+  its attributes.
+- **Optional reactive energy and power factor**: enable **Configure > Reactive energy and power
+  factor** to add **Current month reactive energy** (four-quadrant `R1`-`R4`, in `kvarh`) and
+  **Current month power factor** (`cos phi` and `tan phi`) per POD. Useful for PV/inverter setups
+  or supplies above 16.5 kW; disabled by default to avoid extra API calls.
+- **Access problem binary sensor**: new **Access problem** diagnostic binary sensor on the
+  **E-Distribuzione** account device that turns on while E-Distribuzione blocks automated access,
+  ready for notifications and automations.
+- **Fetch up to 365 days of history in one run**: **E-Distribuzione: Fetch history** now supports
+  ranges up to 1 year (up from 181 days), automatically splitting long requests into safe chunks,
+  and can return structured response data for scripts and automations.
+- **Expanded diagnostics with ARERA band check**: downloaded diagnostics now include local
+  database and Recorder status, Energy Dashboard and Lovelace card status, token refresh details,
+  recent event history, and an automatic check comparing locally computed F1/F2/F3 totals against
+  E-Distribuzione's official monthly totals.
 
-### Changed
-- **Three-host OAuth token refresh fallback**: refreshes now try `private.e-distribuzione.it`, then
-  the direct Salesforce org host (`edistribuzione.my.salesforce.com`, bypassing both Imperva
-  anti-bot and `my.site.com` Transaction Security `app_blocked`), then `edistribuzione.my.site.com`.
-- **Best-effort OAuth token revocation** on integration removal (`async_remove_entry`) to free
-  portal session slots.
-- **Incremental Recorder statistics import** (~99.9% fewer writes on daily cycles) with all
-  SQLite/cumulative work offloaded to the executor, SQLite WAL mode, and per-hour ARERA
-  classification.
-- **Home Assistant 2026.x+ compatibility**: supports the unified Energy Dashboard grid config
-  format (while keeping HA 2025.4+ support), uses `entry.runtime_data` and `async_setup`, and
-  avoids duplicating manual F1/F2/F3 configurations.
+### Improved
+- **More reliable token refresh**: renewing access now falls back across three hosts
+  (`private.e-distribuzione.it`, then the direct Salesforce host
+  `edistribuzione.my.salesforce.com` to bypass both anti-bot blocks and `app_blocked` rejections,
+  then `edistribuzione.my.site.com`).
+- **Automatic session cleanup on removal**: removing the integration now revokes the saved OAuth
+  token on a best-effort basis to free up E-Distribuzione session slots.
+- **Faster, lighter daily updates**: Recorder statistics imports are now incremental (far fewer
+  database writes on daily cycles), the local SQLite database uses WAL mode with work run off
+  Home Assistant's event loop, and ARERA time bands are classified hourly instead of per 15-minute
+  sample.
+- **Home Assistant 2026.x compatibility**: **Configure Energy Dashboard** supports the unified
+  grid source format in Home Assistant 2026.x (while keeping Home Assistant 2025.4+ support) and
+  skips PODs where you already configured F1/F2/F3 time bands manually so totals are not added
+  twice.
+- **Clearer POD entity organization**: on each POD device, power and opt-in reactive sensors
+  appear under primary **Sensors**, while only **Last available date** and **Latest official
+  reading** stay under **Diagnostic**.
+- **Privacy and security**: POD codes, OAuth tokens, query secrets, and tax codes are
+  automatically redacted from logs, errors, and diagnostics (including removed PODs); password and
+  redirect fields are masked in setup forms; strict OAuth `state` validation and explicit HTTP
+  timeouts are enforced; raw HTML debug dumps are no longer saved to disk.
 
 ### Fixed
-- **Privacy & security hardening**: removed raw HTML debug dumps to disk, redacted POD codes,
-  OAuth tokens, query secrets and tax codes across logs/exceptions/diagnostics (including removed
-  PODs and lowercase slugs), enforced strict OAuth `state` validation, added explicit HTTP
-  timeouts, and masked password/redirect fields with HA `TextSelector`.
-- **Concurrency & reliability**: serialized token refresh and imports with `asyncio.Lock`,
-  scoped Repairs issues per config entry, stopped 24/7 hourly polling for PODs without data after
-  bootstrap, retried queued backlog even when yesterday is already present, handled asymmetric
-  `A1`/`A2` delays, rejected orphaned POD devices in `recupera_storico`, and added account
-  `unique_id` deduplication.
-- **POD Lovelace card**: fixed production-only POD discovery, `period` config updates, editor
-  re-render loop on unrelated state updates, async startup race condition, invalid configured POD
-  warning, Safari touch/outside-click tooltip dismissal, cross-year week labels, zero-value band
-  totals, and bounded `Intl` caches.
+- **POD Lovelace card**: fixed discovery of production-only PODs, immediate updates when changing
+  the configured `period`, visual editor re-render loops on unrelated Home Assistant state
+  updates, a startup race condition, clear feedback when a configured POD has no imported data,
+  tooltip dismissal on Safari and outside taps, cross-year week labels, zero-value band totals,
+  and unbounded formatter caches.
+- **Update and multi-account reliability**: prevented concurrent token refresh and import races,
+  scoped blocked-access Repairs notices to the specific affected account, stopped unnecessary
+  hourly polling for PODs that have no data after initial setup, ensured queued retries still run
+  when yesterday's data is already imported, handled asymmetric consumption/injection delays,
+  rejected orphaned POD devices in **Fetch history**, and prevented configuring the same account
+  twice.
+- **Home Assistant compatibility and CI**: fixed Repairs flow compatibility across Home Assistant
+  versions, silenced the Hassfest `CONFIG_SCHEMA` warning, and added automated `ruff` linting and
+  `pytest` runs in GitHub Actions.
 
 ## 0.8.9
 ### Added

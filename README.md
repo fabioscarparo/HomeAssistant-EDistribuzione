@@ -260,9 +260,9 @@ problem** are under Diagnostic.
 Run **E-Distribuzione: Configure Energy Dashboard** from **Developer tools →
 Actions**. It adds the statistics of every configured POD according to its
 role, and never overwrites or duplicates sources that already exist,
-including those added by hand. Run it again after adding a POD or changing
-a role, but not after switching to the
-[F1/F2/F3 bands](#with-the-f1f2f3-bands).
+including those added by hand or switched to the
+[F1/F2/F3 bands](#with-the-f1f2f3-bands). Run it again after adding a POD or
+changing a role.
 
 ### Manual configuration
 
@@ -289,8 +289,8 @@ return to grid sources with their own compensation.
 
 > [!IMPORTANT]
 > Never add the total *and* the bands of the same direction together, or
-> the energy is counted twice. For the same reason, do not run **Configure
-> Energy Dashboard** after switching to the bands: it adds the totals back.
+> the energy is counted twice. **Configure Energy Dashboard** automatically
+> skips PODs that already use the F1/F2/F3 bands.
 
 ## F1 / F2 / F3 time bands
 
