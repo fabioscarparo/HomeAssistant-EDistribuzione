@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 from . import fasce, lovelace_card, raw_storage
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID_OAUTH,
     CONF_GIORNI_DA_RIPROVARE,
     CONF_PODS,
     CONF_REFRESH_TOKEN,
@@ -27,6 +28,7 @@ from .const import (
     ISSUE_ACCESSO_BLOCCATO,
     ISSUE_APP_BLOCCATA,
     MAGNITUDE_TUTTE,
+    OAUTH_CLIENT_ID,
     issue_id_per_entry,
 )
 from .dati_api import confronta_fasce_mese
@@ -140,6 +142,7 @@ async def async_get_config_entry_diagnostics(
         "accesso": {
             "access_token_salvato": bool(entry.data.get(CONF_ACCESS_TOKEN)),
             "refresh_token_salvato": bool(entry.data.get(CONF_REFRESH_TOKEN)),
+            "client_id_aggiornato": entry.data.get(CONF_CLIENT_ID_OAUTH) == OAUTH_CLIENT_ID,
         },
         "avvisi_attivi": avvisi_attivi,
     }

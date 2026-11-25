@@ -1,6 +1,9 @@
 """E-Distribuzione protocol constants: login via Salesforce, data from MuleSoft."""
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 DOMAIN = "edistribuzione"
 
 # --- Salesforce Experience Cloud (login / OAuth2 + PKCE) --------------------
@@ -22,6 +25,24 @@ SF_HOST_DIRETTO = "edistribuzione.my.site.com"
 SF_HOST_TOKEN = "edistribuzione.my.salesforce.com"
 SF_HOSTS = (SF_HOST_PRINCIPALE, SF_HOST_DIRETTO)
 
+# Allowed HTTPS hosts when following login redirects, bridge pages and forms.
+# Exact hosts and .e-distribuzione.it subdomains are listed here; Salesforce
+# org domains are additionally scoped to E-Distribuzione's own org prefixes
+# (HOST_SALESFORCE_PREFISSI + HOST_SALESFORCE_SUFFISSI) so arbitrary third-party
+# Salesforce orgs on *.my.site.com / *.salesforce.com / *.force.com are rejected.
+HOST_LOGIN_AMMESSI = (
+    *SF_HOSTS,
+    SF_HOST_TOKEN,
+    ".e-distribuzione.it",
+)
+HOST_SALESFORCE_PREFISSI = ("edistribuzione.", "edistribuzione--")
+HOST_SALESFORCE_SUFFISSI = (
+    ".salesforce.com",
+    ".force.com",
+    ".my.site.com",
+    ".salesforce-sites.com",
+)
+
 SF_BASE = f"https://{SF_HOST_PRINCIPALE}/PortaleClienti"
 
 OAUTH_AUTHORIZE_URL = f"{SF_BASE}/services/oauth2/authorize"
@@ -35,15 +56,27 @@ LOGIN_PAGE_URL = f"{SF_BASE}/s/login/"
 AURA_ENDPOINT = f"{SF_BASE}/s/sfsites/aura"
 LOGINFLOW_URL = f"{SF_BASE}/loginflow/loginFlow.apexp"
 
-# Client ID of the official E-Distribuzione app: public, native-app style, no
-# client secret (PKCE). It is a third-party client on Enel's infrastructure,
-# so treat it as subject to change or revocation without notice.
+# Client ID of the updated official E-Distribuzione app (iOS 1.5.4 / Android 1.5.8,
+# November 2026 ForceUpdate): public, native-app style, no client secret (PKCE).
+# Treat it as subject to change or revocation without notice.
 OAUTH_CLIENT_ID = (
+    "3MVG9Rd3qC6oMalUVUXDfNEIi5wmqcb6MVZMb_WQdp_fCJ1zvnx6ufi2J4KW7ikvzlMVVbdwYjeEMAZrdrYoP"
+)
+# Previous app client (used until October 2026). A refresh_token only works with
+# the client_id that issued it, so entries created before saving CONF_CLIENT_ID_OAUTH
+# keep refreshing with this client until their next sign-in or reauth.
+OAUTH_CLIENT_ID_PRECEDENTE = (
     "3MVG9Rd3qC6oMalUVUXDfNEIi52RXSZMsndjnAnbka4R4Amhq6QrTj2U2Zw0sjyqOlFViLC"
     ".cTpau8fPEBV0V"
 )
 OAUTH_REDIRECT_URI = "eneldist://redirect"
 OAUTH_SCOPE = "web api openid id profile email address phone refresh_token offline_access"
+
+# Automated password+OTP login has been blocked by E-Distribuzione since October 2026
+# (Imperva on private.e-distribuzione.it, "Errore Tecnico" on my.site.com). While
+# False, setup and reauth go straight to browser sign-in. Set back to True if
+# automated login starts working again.
+LOGIN_PASSWORD_DISPONIBILE = False
 
 # --- Data backend (MuleSoft) -------------------------------------------------
 MISURE_BASE_URL = "https://xs-misura-p.de-c1.eu1.cloudhub.io/xs/misure"
@@ -93,9 +126,15 @@ DIREZIONI_CON_FASCE = (MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA)
 CONF_PODS = "pods"  # list of POD codes, all on the same authenticated account
 CONF_ACCESS_TOKEN = "access_token"
 CONF_REFRESH_TOKEN = "refresh_token"
+CONF_CLIENT_ID_OAUTH = "client_id_oauth"
 CONF_INSTANCE_URL = "instance_url"
 CONF_TOKEN_ORIGINE = "token_origine"
 CONF_TOKEN_AGGIORNATO_IL = "token_aggiornato_il"
+
+
+def client_id_della_entry(dati: Mapping[str, Any]) -> str:
+    """OAuth client_id to use when refreshing an entry's refresh_token."""
+    return dati.get(CONF_CLIENT_ID_OAUTH) or OAUTH_CLIENT_ID_PRECEDENTE
 
 MAX_EVENTI_CRONOLOGIA = 15
 

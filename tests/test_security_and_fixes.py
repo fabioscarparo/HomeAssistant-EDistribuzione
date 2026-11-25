@@ -201,7 +201,7 @@ async def test_auth_refresh_keeps_old_refresh_token_when_server_returns_null():
     tokens = await client.async_refresh_access_token("old-rt")
     assert tokens.access_token == "new-acc"
     assert tokens.refresh_token == "old-rt"
-    assert client.host_attivo == "private.e-distribuzione.it"
+    assert client.host_attivo == "edistribuzione.my.salesforce.com"
 
 
 def test_auth_browser_redirect_strips_trailing_punctuation():
@@ -288,7 +288,7 @@ def test_auth_discovers_dynamic_richfaces_form_id_and_nav_field():
 async def test_coordinator_concurrent_token_refresh_runs_once(make_edist_coordinator):
     coordinator = make_edist_coordinator(data={CONF_ACCESS_TOKEN: "old-token"})
 
-    async def slow_refresh(rt):
+    async def slow_refresh(rt, client_id=None):
         await asyncio.sleep(0.05)
         return SimpleNamespace(access_token="new-token", refresh_token="rt2", instance_url="")
 
@@ -503,11 +503,9 @@ async def test_config_flow_prevents_duplicate_account_and_detaches_session(hass,
     monkeypatch.setattr(cf, "async_get_clientsession", lambda *a, **k: Mock())
 
     with patch("custom_components.edistribuzione.async_setup_entry", return_value=True):
-        # Browser login must not create a dedicated ClientSession.
+        # Browser login goes straight from user step and must not create a dedicated ClientSession.
         res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
-        res = await hass.config_entries.flow.async_configure(
-            res["flow_id"], {"next_step_id": "browser_login"}
-        )
+        assert res["step_id"] == "browser_login"
         res = await hass.config_entries.flow.async_configure(
             res["flow_id"], {"redirect_url": "eneldist://redirect#ok"}
         )
@@ -515,6 +513,7 @@ async def test_config_flow_prevents_duplicate_account_and_detaches_session(hass,
         create_session.assert_not_called()
 
         # Second setup with same account must abort as already_configured and detach session.
+        monkeypatch.setattr(cf, "LOGIN_PASSWORD_DISPONIBILE", True)
         res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
         res = await hass.config_entries.flow.async_configure(
             res["flow_id"], {"next_step_id": "password_login"}

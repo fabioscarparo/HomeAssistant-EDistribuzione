@@ -59,6 +59,7 @@ from .const import (
     RITARDO_DATI_GIORNI,
     TIPO_POD_DEFAULT,
     TIPO_POD_PRODUZIONE,
+    client_id_della_entry,
     issue_id_per_entry,
 )
 from .dati_api import (
@@ -203,6 +204,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         self._forniture_giorno: date | None = None
         self._mensili_giorno: dict[str, date] = {}
         self._letture_giorno: dict[str, date] = {}
+        self._ausiliari_avvio_tentati = False
 
         session = async_get_clientsession(hass)
         self._auth = AuthClient(session, instance_url=entry.data.get(CONF_INSTANCE_URL))
@@ -336,7 +338,9 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
 
             t0 = time.monotonic()
             try:
-                tokens = await self._auth.async_refresh_access_token(refresh_token)
+                tokens = await self._auth.async_refresh_access_token(
+                    refresh_token, client_id_della_entry(self.entry.data)
+                )
             except AuthError as err:
                 durata_ms = round((time.monotonic() - t0) * 1000)
                 self._registra_errore_accesso(err)
@@ -428,7 +432,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
             return
         try:
             supplies = await self._async_chiama_api(self._api.async_get_supplies)
-        except (ApiError, UpdateFailed) as err:
+        except ApiError as err:
             _LOGGER.warning("Aggiornamento metadati forniture fallito: %s", err)
             return
         self._forniture_giorno = oggi
@@ -446,14 +450,14 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         inizio = fine_mese_prec.replace(day=1)
         per_dir: dict[str, dict[str, Any] | None] = dict(self.mensili.get(pod) or {})
         successo = False
-        for magnitude in MAGNITUDE_TUTTE:
+        for magnitude in self._magnitudes_attive(pod):
             try:
                 righe = await self._async_chiama_api(
                     lambda m=magnitude: self._api.async_get_monthly_time_of_use(
                         pod, inizio, ieri, magnitude=m
                     )
                 )
-            except (ApiError, UpdateFailed) as err:
+            except ApiError as err:
                 _LOGGER.warning(
                     "POD %s: riepilogo mensile (%s) non disponibile: %s",
                     mask_pod(pod),
@@ -481,7 +485,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                         pod, inizio, ieri, magnitude=m
                     )
                 )
-            except (ApiError, UpdateFailed) as err:
+            except ApiError as err:
                 _LOGGER.warning(
                     "POD %s: riepilogo reattiva (%s) non disponibile: %s",
                     mask_pod(pod),
@@ -513,7 +517,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
             righe = await self._async_chiama_api(
                 lambda: self._api.async_get_reading(pod, inizio, oggi)
             )
-        except (ApiError, UpdateFailed) as err:
+        except ApiError as err:
             _LOGGER.warning(
                 "POD %s: letture ufficiali non disponibili: %s", mask_pod(pod), err
             )
@@ -523,19 +527,52 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         if estratta is not None:
             self.letture_ufficiali[pod] = estratta
 
-    async def _async_aggiorna_ausiliari(self, pod_aggiornati: set[str]) -> None:
-        """Best-effort refresh of supply metadata, monthly TOU and official readings."""
+    def _servono_ausiliari_avvio(self) -> bool:
+        """True until the startup auxiliary attempt runs without an access/refresh error."""
+        if self._ausiliari_avvio_tentati:
+            return False
+        if not self.forniture and self._forniture_giorno is None:
+            return True
+        for pod in self.pods:
+            if pod not in self.mensili and pod not in self._mensili_giorno:
+                return True
+            if pod not in self.letture_ufficiali and pod not in self._letture_giorno:
+                return True
+        return False
+
+    async def _async_aggiorna_ausiliari(
+        self, pod_aggiornati: set[str], *, includi_forniture: bool = True
+    ) -> None:
+        """Best-effort refresh of supply metadata, monthly TOU and official readings.
+
+        Stops immediately on an access/refresh UpdateFailed so a blocked token
+        endpoint is never hammered repeatedly across magnitudes and PODs. Marks
+        startup auxiliaries as attempted once the run finishes without an access
+        error, preventing hourly retries outside the evening window on persistent
+        API errors.
+        """
         if not self._api.has_token:
             return
         oggi = dt_util.now(FUSO_ITALIA).date()
-        await self._async_aggiorna_forniture(oggi)
-        for pod in self.pods:
-            if pod in pod_aggiornati or (
-                pod not in self.mensili and self._mensili_giorno.get(pod) != oggi
+        try:
+            if includi_forniture and (
+                pod_aggiornati or (not self.forniture and self._forniture_giorno is None)
             ):
-                await self._async_aggiorna_mensili(pod, oggi)
-            if pod in pod_aggiornati or pod not in self.letture_ufficiali:
-                await self._async_aggiorna_letture(pod, oggi)
+                await self._async_aggiorna_forniture(oggi)
+            for pod in self.pods:
+                if pod in pod_aggiornati or (
+                    pod not in self.mensili and pod not in self._mensili_giorno
+                ):
+                    await self._async_aggiorna_mensili(pod, oggi)
+                if pod in pod_aggiornati or (
+                    pod not in self.letture_ufficiali and pod not in self._letture_giorno
+                ):
+                    await self._async_aggiorna_letture(pod, oggi)
+            self._ausiliari_avvio_tentati = True
+        except UpdateFailed as err:
+            _LOGGER.warning(
+                "Aggiornamento dati ausiliari interrotto per errore di accesso: %s", err
+            )
 
     async def async_ricostruisci_serie_mancanti(self) -> None:
         """Rebuild missing or lagging statistics from raw_storage without network calls."""
@@ -735,6 +772,19 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
         immessa = (self.riepilogo.get(pod) or {}).get("ultimo_giorno", {}).get(MAGNITUDE_IMMESSA)
         return bool(immessa and (immessa.get("kwh") or 0) > 0)
 
+    def _pod_supporta_immissione(self, pod: str) -> bool:
+        """True unless getSupplies explicitly confirmed HasPlant=False on a non-production POD."""
+        if self._pod_ha_immessa_storica(pod):
+            return True
+        fornitura = self.forniture.get(pod)
+        return not (isinstance(fornitura, dict) and fornitura.get("ha_impianto") is False)
+
+    def _magnitudes_attive(self, pod: str) -> tuple[str, ...]:
+        """Active energy magnitudes to request for this POD."""
+        if self._pod_supporta_immissione(pod):
+            return MAGNITUDE_TUTTE
+        return (MAGNITUDE_PRELEVATA,)
+
     async def async_stato_prossima_richiesta(self, pod: str) -> dict[str, Any]:
         """Read-only summary of why/when the next automatic fetch will run for diagnostics."""
         adesso = dt_util.now(FUSO_ITALIA)
@@ -828,11 +878,11 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
     # ------------------------------------------------------------------
 
     async def _async_importa_periodo(self, pod: str, data_da: date, data_a: date) -> dict[str, dict]:
-        """Request and import both directions for a POD, chunking spans over 180 days."""
+        """Request and import active energy directions for a POD, chunking over 180 days."""
         risultati: dict[str, dict] = {}
         pod_log = mask_pod(pod)
         chunks = _suddividi_intervallo(data_da, data_a, CHUNK_GIORNI_STORICO)
-        for magnitude in MAGNITUDE_TUTTE:
+        for magnitude in self._magnitudes_attive(pod):
             giorni_totali: set[date] = set()
             for c_da, c_a in chunks:
                 curva = await self._async_get_daily_load_profile(
@@ -897,18 +947,24 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self) -> dict:
         t0 = time.monotonic()
         async with self._import_lock:
-            await self._async_ensure_token()
-
-            errori: dict[str, str] = {}
-            richiesti_count = 0
-            pod_aggiornati: set[str] = set()
+            oggi = dt_util.now(FUSO_ITALIA).date()
+            richieste_per_pod: list[tuple[str, date, date]] = []
             for pod in self.pods:
                 richiesta = await self._prossima_richiesta(pod)
-                if richiesta is None:
-                    continue
+                if richiesta is not None:
+                    richieste_per_pod.append((pod, richiesta[0], richiesta[1]))
 
-                richiesti_count += 1
-                data_da, data_a = richiesta
+            servono_ausiliari = bool(richieste_per_pod) or self._servono_ausiliari_avvio()
+            if richieste_per_pod or servono_ausiliari:
+                await self._async_ensure_token()
+
+            if richieste_per_pod and self._api.has_token:
+                await self._async_aggiorna_forniture(oggi)
+
+            errori: dict[str, str] = {}
+            richiesti_count = len(richieste_per_pod)
+            pod_aggiornati: set[str] = set()
+            for pod, data_da, data_a in richieste_per_pod:
                 try:
                     risultati = await self._async_importa_periodo(pod, data_da, data_a)
                 except ApiError as err:
@@ -944,7 +1000,7 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 if mancanti:
                     self._accoda_giorni(pod, mancanti)
 
-                if ricevuti_prelevata != ricevuti_immessa:
+                if self._pod_supporta_immissione(pod) and ricevuti_prelevata != ricevuti_immessa:
                     _LOGGER.info(
                         "POD %s: prelevata e immessa non coprono esattamente gli stessi "
                         "giorni in questo ciclo (prelevata=%s, immessa=%s)",
@@ -953,7 +1009,10 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                         sorted(g.isoformat() for g in ricevuti_immessa),
                     )
 
-            await self._async_aggiorna_ausiliari(pod_aggiornati)
+            if servono_ausiliari:
+                await self._async_aggiorna_ausiliari(
+                    pod_aggiornati, includi_forniture=not richieste_per_pod
+                )
             riepilogo = await self.async_aggiorna_riepilogo()
             durata_ms = round((time.monotonic() - t0) * 1000)
             if richiesti_count or errori:
@@ -1081,14 +1140,20 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                             elenco += f", e altri {len(mancanti) - 10}"
                         dettaglio_mancanti = f" ({elenco})"
 
+                    descrizione_direzioni = (
+                        "unione delle due direzioni"
+                        if self._pod_supporta_immissione(pod_corrente)
+                        else "solo prelevata"
+                    )
                     _LOGGER.info(
                         "POD %s: recupero storico %s - %s completato, %d/%d giorni ricevuti "
-                        "(unione delle due direzioni)%s",
+                        "(%s)%s",
                         pod_log,
                         data_da,
                         data_a,
                         len(ricevuti_unione),
                         len(giorni_attesi),
+                        descrizione_direzioni,
                         dettaglio_mancanti,
                     )
             finally:

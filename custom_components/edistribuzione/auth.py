@@ -20,12 +20,15 @@ import re
 import secrets
 import uuid
 from dataclasses import dataclass, field
-from urllib.parse import parse_qs, unquote, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlsplit
 
 import aiohttp
 
 from .const import (
     AURA_ENDPOINT,
+    HOST_LOGIN_AMMESSI,
+    HOST_SALESFORCE_PREFISSI,
+    HOST_SALESFORCE_SUFFISSI,
     HTTP_CONNECT_TIMEOUT_SECONDS,
     HTTP_TIMEOUT_SECONDS,
     LOGINFLOW_URL,
@@ -45,6 +48,7 @@ from .redaction import redact_preview, redact_url
 _LOGGER = logging.getLogger(__name__)
 
 _MOBILE_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"
+_HEADERS_TOKEN = {"Accept": "application/json"}
 
 _MAX_REDIRECT_HOPS = 15
 
@@ -101,8 +105,8 @@ _MARCATORI_OTP_ERRORE = ("errat", "scadut", "non valid", "invalid", "expired", "
 # Approval button labels on the Salesforce OAuth consent screen.
 _ETICHETTE_CONSENSO = ("consenti", "allow", "approve", "autorizza", "accetta")
 
-# Match the app redirect alone or inside a browser console log line.
-_RE_REDIRECT_APP = re.compile(re.escape(OAUTH_REDIRECT_URI) + r"[^\s'\"<>]*")
+# Match the app redirect alone or inside a browser console log / JS / JSON string.
+_RE_REDIRECT_APP = re.compile(re.escape(OAUTH_REDIRECT_URI) + r"[^\s'\"<>\\]*")
 _TRAILING_PUNCTUATION = ".,;)]}"
 
 # HTML attribute helpers (word-boundary safe, supports single or double quotes).
@@ -199,6 +203,56 @@ class ParsingError(AuthError):
     """Scraped Salesforce page did not contain the expected markup."""
 
 
+class HostNonAmmesso(ParsingError):
+    """Login redirect, bridge page or form pointed to an unexpected or non-HTTPS host."""
+
+
+_SCHEMA_REDIRECT_APP = urlsplit(OAUTH_REDIRECT_URI).scheme.lower()
+
+
+def _host_ammesso(host: str) -> bool:
+    """True if host belongs to E-Distribuzione or its Salesforce org."""
+    if any(
+        (host.endswith(voce) and len(host) > len(voce)) if voce.startswith(".") else host == voce
+        for voce in HOST_LOGIN_AMMESSI
+    ):
+        return True
+    return host.startswith(HOST_SALESFORCE_PREFISSI) and host.endswith(HOST_SALESFORCE_SUFFISSI)
+
+
+def _verifica_host(url: object, passo: str) -> None:
+    """Raise HostNonAmmesso on unexpected schemes, protocol-relative hosts or untrusted domains."""
+    parti = urlsplit(str(url))
+    schema = parti.scheme.lower()
+    if schema == "":
+        if not parti.netloc:
+            return
+        host_ref = (parti.hostname or parti.netloc).lower()
+        messaggio = (
+            f'Accesso E-Distribuzione interrotto al passo "{passo}": il portale '
+            f"ha indicato //{host_ref}, che non usa https."
+        )
+        _LOGGER.error("%s", messaggio)
+        raise HostNonAmmesso(messaggio)
+    if schema == _SCHEMA_REDIRECT_APP:
+        return
+    host = (parti.hostname or "").lower()
+    if schema == "https" and _host_ammesso(host):
+        return
+    if schema == "https":
+        motivo = "non è tra quelli ammessi"
+    elif schema == "http":
+        motivo = "non usa https"
+    else:
+        motivo = "usa uno schema non ammesso"
+    messaggio = (
+        f'Accesso E-Distribuzione interrotto al passo "{passo}": il portale '
+        f"ha indicato {schema}://{host}, che {motivo}."
+    )
+    _LOGGER.error("%s", messaggio)
+    raise HostNonAmmesso(messaggio)
+
+
 def _parametri_redirect(url: str) -> dict[str, str]:
     """Decode OAuth redirect fragment or query without turning '+' into spaces."""
     parti = urlsplit(url)
@@ -255,17 +309,19 @@ async def _get_following_redirects(
     riscrivi=_identita,
     client_timeout: aiohttp.ClientTimeout = DEFAULT_TIMEOUT,
     stop_on_app_redirect: bool = False,
+    passo: str = "redirect",
 ) -> aiohttp.ClientResponse | str:
     """Follow redirects manually with encoded=True to avoid double-encoding startURL.
 
     If stop_on_app_redirect is True and a Location targets OAUTH_REDIRECT_URI
     without an OAuth error, returns that Location string directly.
     """
+    _verifica_host(url, passo)
     resp = await session.get(
         url, params=params, headers=headers, allow_redirects=False, timeout=client_timeout
     )
 
-    for _ in range(_MAX_REDIRECT_HOPS):
+    for numero_hop in range(1, _MAX_REDIRECT_HOPS + 1):
         location = resp.headers.get("Location")
         _LOGGER.debug(
             "GET %s: HTTP %s%s",
@@ -290,6 +346,7 @@ async def _get_following_redirects(
         location_url = aiohttp.client.URL(location, encoded=True)
         next_url = location_url if location_url.is_absolute() else resp.url.join(location_url)
         next_url = aiohttp.client.URL(riscrivi(str(next_url)), encoded=True)
+        _verifica_host(next_url, f"{passo}, redirect {numero_hop}")
         resp = await session.get(
             next_url, headers=headers, allow_redirects=False, timeout=client_timeout
         )
@@ -365,7 +422,11 @@ class AuthClient:
             parts = urlsplit(self._instance_url)
             host = (parts.hostname or "").lower()
             if parts.scheme == "https" and (
-                host == SF_HOST_TOKEN or host.endswith(".salesforce.com")
+                host == SF_HOST_TOKEN
+                or (
+                    host.startswith(HOST_SALESFORCE_PREFISSI)
+                    and host.endswith(".salesforce.com")
+                )
             ):
                 return host
         return SF_HOST_TOKEN
@@ -405,7 +466,7 @@ class AuthClient:
             )
             raise InvalidBrowserRedirect("mancante")
 
-        url_estratto = corrispondenza.group(0).rstrip(_TRAILING_PUNCTUATION)
+        url_estratto = html_lib.unescape(corrispondenza.group(0)).rstrip(_TRAILING_PUNCTUATION)
         parametri = _parametri_redirect(url_estratto)
         _LOGGER.debug("Login nel browser: parametri ricevuti %s", sorted(parametri))
 
@@ -506,6 +567,7 @@ class AuthClient:
             headers=headers,
             riscrivi=self._su_host,
             client_timeout=self._timeout,
+            passo="authorize OAuth verso la pagina di login",
         )
         try:
             login_page_html = await _leggi_testo(resp)
@@ -656,6 +718,7 @@ class AuthClient:
             headers=headers,
             riscrivi=self._su_host,
             client_timeout=self._timeout,
+            passo="frontdoor dopo le credenziali",
         )
         try:
             bridge_html = await _leggi_testo(resp)
@@ -669,6 +732,7 @@ class AuthClient:
             headers=headers,
             riscrivi=self._su_host,
             client_timeout=self._timeout,
+            passo="pagina del codice OTP",
         )
         try:
             return await _leggi_testo(resp)
@@ -787,9 +851,9 @@ class AuthClient:
                 f"l'invio dell'OTP (risposta lunga {len(body)} caratteri)"
             )
         next_url = unquote(html_lib.unescape(loc_match.group(3)))
-        if next_url.startswith("/"):
-            next_url = self._origin + next_url
-        return self._su_host(next_url)
+        next_url = self._su_host(urljoin(f"{self._origin}/", next_url))
+        _verifica_host(next_url, "redirect dopo il codice OTP")
+        return next_url
 
     async def _scarica_pagina_dopo_otp(self, next_url: str) -> str:
         """Step 6: follow redirects on the active host until the consent/code page."""
@@ -801,6 +865,7 @@ class AuthClient:
             riscrivi=self._su_host,
             client_timeout=self._timeout,
             stop_on_app_redirect=True,
+            passo="pagina di autorizzazione dopo l'OTP",
         )
         if isinstance(result, str):
             return result
@@ -849,6 +914,7 @@ class AuthClient:
 
         action_url, dati = form
         action_url = self._su_host(action_url)
+        _verifica_host(action_url, "form di consenso OAuth")
         _LOGGER.info(
             "Schermata di consenso OAuth rilevata: confermo con %r",
             dati.get("save"),
@@ -909,8 +975,7 @@ class AuthClient:
             action_url = html_lib.unescape(action.group(2)) if action else ""
             if not action_url:
                 return None
-            if action_url.startswith("/"):
-                action_url = f"https://{SF_HOST_PRINCIPALE}" + action_url
+            action_url = urljoin(f"https://{SF_HOST_PRINCIPALE}/", action_url)
             return action_url, dati
 
         return None
@@ -933,7 +998,10 @@ class AuthClient:
             "grant_type": "authorization_code",
         }
         async with self._session.post(
-            self._su_host(OAUTH_TOKEN_URL), data=data, timeout=self._timeout
+            self._su_host(OAUTH_TOKEN_URL),
+            data=data,
+            headers=_HEADERS_TOKEN,
+            timeout=self._timeout,
         ) as resp:
             payload = self._json_token(
                 await _leggi_testo(resp), resp.status, "Scambio del codice OAuth fallito"
@@ -941,33 +1009,47 @@ class AuthClient:
         return self._tokens_from_payload(payload)
 
     def _candidati_refresh(self) -> list[tuple[str, str]]:
-        """Ordered (host, token_url) candidates for token refresh."""
+        """Ordered (host, token_url) candidates for token refresh.
+
+        Try the direct Salesforce org host first (no Imperva anti-bot, no
+        my.site.com app_blocked), then fall back to the portal's custom domain.
+        """
         org_host = self._host_token_diretto()
         return [
-            (SF_HOST_PRINCIPALE, OAUTH_TOKEN_URL),
             (org_host, f"https://{org_host}/services/oauth2/token"),
-            (SF_HOST_DIRETTO, _riscrivi_su_host(OAUTH_TOKEN_URL, SF_HOST_DIRETTO)),
+            (SF_HOST_PRINCIPALE, OAUTH_TOKEN_URL),
         ]
 
-    async def async_refresh_access_token(self, refresh_token: str) -> OAuthTokens:
-        """Refresh the access token, falling back across Salesforce hosts on blocks."""
-        ultimo_blocco: AccessoBloccato | AppBloccata | None = None
+    async def async_refresh_access_token(
+        self, refresh_token: str, client_id: str = OAUTH_CLIENT_ID
+    ) -> OAuthTokens:
+        """Refresh the access token, trying the direct Salesforce org host first."""
+        primo_errore: AccessoBloccato | AppBloccata | aiohttp.ClientError | TimeoutError | None = (
+            None
+        )
         candidati = self._candidati_refresh()
         for indice, (host, token_url) in enumerate(candidati):
             _LOGGER.debug("Rinnovo dell'accesso: tentativo su %s", host)
             try:
-                tokens = await self._async_refresh_su_url(refresh_token, token_url)
-            except (AccessoBloccato, AppBloccata) as err:
-                ultimo_blocco = err
+                tokens = await self._async_refresh_su_url(refresh_token, token_url, client_id)
+            except (AccessoBloccato, AppBloccata, aiohttp.ClientError, TimeoutError) as err:
+                if primo_errore is None:
+                    primo_errore = err
                 if indice + 1 < len(candidati):
                     prossimo_host = candidati[indice + 1][0]
                     _LOGGER.warning(
-                        "Refresh bloccato su %s (%s), riprovo via %s",
+                        "Refresh fallito su %s (%s), riprovo via %s",
                         host,
                         type(err).__name__,
                         prossimo_host,
                     )
                     continue
+                raise primo_errore from None
+            except AuthError as err:
+                # If the fallback host fails generically after the primary host already
+                # failed, preserve the primary reason (except explicit invalid_grant).
+                if primo_errore is not None and not isinstance(err, TokenNonValido):
+                    raise primo_errore from None
                 raise
             self._host = host
             _LOGGER.debug(
@@ -976,16 +1058,20 @@ class AuthClient:
                 "sì" if tokens.refresh_token != refresh_token else "no",
             )
             return tokens
-        assert ultimo_blocco is not None
-        raise ultimo_blocco
+        assert primo_errore is not None
+        raise primo_errore
 
-    async def _async_refresh_su_url(self, refresh_token: str, token_url: str) -> OAuthTokens:
+    async def _async_refresh_su_url(
+        self, refresh_token: str, token_url: str, client_id: str = OAUTH_CLIENT_ID
+    ) -> OAuthTokens:
         data = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
-            "client_id": OAUTH_CLIENT_ID,
+            "client_id": client_id,
         }
-        async with self._session.post(token_url, data=data, timeout=self._timeout) as resp:
+        async with self._session.post(
+            token_url, data=data, headers=_HEADERS_TOKEN, timeout=self._timeout
+        ) as resp:
             payload = self._json_token(
                 await _leggi_testo(resp), resp.status, "Scambio del refresh_token fallito"
             )
@@ -1167,6 +1253,5 @@ class AuthClient:
         form_action = _RE_FORM_ACTION.search(html)
         if form_action:
             action = html_lib.unescape(form_action.group(2))
-            self._flow.form_action_url = self._su_host(
-                action if action.startswith("http") else f"{self._origin}{action}"
-            )
+            self._flow.form_action_url = self._su_host(urljoin(f"{self._origin}/", action))
+            _verifica_host(self._flow.form_action_url, "form del codice OTP")

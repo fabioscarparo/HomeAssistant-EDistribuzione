@@ -84,6 +84,35 @@ class TestOAuthBrowser:
         assert params["response_type"] == ["token"]
         assert params["state"] == [client._oauth_state]
         assert params["redirect_uri"] == [auth.OAUTH_REDIRECT_URI]
+        assert params["client_id"] == [auth.OAUTH_CLIENT_ID]
+        assert auth.OAUTH_CLIENT_ID != sys.modules["edistribuzione_test_auth.const"].OAUTH_CLIENT_ID_PRECEDENTE
+
+    def test_accetta_risposta_intera_di_remote_access_authorization_page(self):
+        """Real 2026-11-24 format: HTTP 200 JS redirect inside RemoteAccessAuthorizationPage.apexp."""
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = (
+            f"{auth.OAUTH_REDIRECT_URI}#access_token=00D%21AQ&refresh_token=5Aep+x%3D"
+            f"&instance_url=https%3A%2F%2Fedistribuzione.my.salesforce.com"
+            f"&state={client._oauth_state}&token_type=Bearer"
+        )
+        pagina = (
+            "<!DOCTYPE HTML>\n<html><script>function redirectOnLoad() { "
+            f"if (window.location.replace){{ window.location.replace('{redirect}'); }}"
+            f" else {{ window.location.href ='{redirect}'; }} }}</script></html>"
+        )
+        tokens = client.tokens_from_browser_redirect(pagina)
+        assert (tokens.access_token, tokens.refresh_token) == ("00D!AQ", "5Aep+x=")
+        assert tokens.instance_url == "https://edistribuzione.my.salesforce.com"
+
+    def test_accetta_redirect_con_escape_json(self):
+        """JSON/HAR-escaped quotes (\\") must not leak a trailing backslash into state."""
+        client = self._client()
+        client.prepare_browser_token_authorization_url()
+        redirect = self._redirect(client, access_token="AT1", refresh_token="RT1")
+        pasted = f'{{"location": "{redirect}\\"}}'
+        tokens = client.tokens_from_browser_redirect(pasted)
+        assert (tokens.access_token, tokens.refresh_token) == ("AT1", "RT1")
 
     def test_url_browser_e_l_autorizzazione_sul_dominio_personalizzato(self):
         """Issues #6 and #8: the link is opened after signing in on the
@@ -566,7 +595,7 @@ class _SessioneACoda:
         return self._risposte.pop(0)
 
     def post(self, url, data=None, headers=None, allow_redirects=None, **kwargs):
-        self.post_inviati.append({"url": url, "data": data})
+        self.post_inviati.append({"url": url, "data": data, "headers": headers})
         return self._prossima()
 
     def get(self, url, headers=None, **kwargs):
@@ -679,11 +708,9 @@ class TestAccessoBloccato:
         assert issubclass(auth.AccessoBloccato, auth.AuthError)
 
     async def test_refresh_bloccato_su_tutti_gli_host(self):
-        """All three hosts blocked: primary, direct Salesforce org host, and
-        site fallback are tried in order before raising AccessoBloccato."""
+        """Both refresh hosts blocked: direct Salesforce org host first, then custom domain."""
         session = _SessioneACoda(
             [
-                _RispostaToken(PAGINA_ANTIBOT),
                 _RispostaToken(PAGINA_ANTIBOT),
                 _RispostaToken(PAGINA_ANTIBOT),
             ]
@@ -692,22 +719,34 @@ class TestAccessoBloccato:
             await auth.AuthClient(session).async_refresh_access_token("rt")
         host_provati = [u["url"].split("/")[2] for u in session.post_inviati]
         assert host_provati == [
-            "private.e-distribuzione.it",
             "edistribuzione.my.salesforce.com",
-            "edistribuzione.my.site.com",
+            "private.e-distribuzione.it",
         ]
 
-    async def test_refresh_fallback_sul_dominio_diretto(self):
-        """Primary blocked, direct Salesforce org host fine: refresh succeeds
-        through edistribuzione.my.salesforce.com without raising."""
+    async def test_refresh_fallback_sul_dominio_del_portale(self):
+        """Direct org host blocked, custom portal domain fine: refresh falls back cleanly."""
         session = _SessioneACoda(
             [_RispostaToken(PAGINA_ANTIBOT), _RispostaToken('{"access_token": "nuovo"}')]
         )
         tokens = await auth.AuthClient(session).async_refresh_access_token("rt")
         assert tokens.access_token == "nuovo"
-        assert session.post_inviati[-1]["url"] == (
+        assert session.post_inviati[0]["url"] == (
             "https://edistribuzione.my.salesforce.com/services/oauth2/token"
         )
+        assert session.post_inviati[0]["headers"] == {"Accept": "application/json"}
+        assert session.post_inviati[-1]["url"] == (
+            "https://private.e-distribuzione.it/PortaleClienti/services/oauth2/token"
+        )
+
+    async def test_refresh_passa_client_id_richiesto(self):
+        """Refresh sends the caller-provided client_id (needed for legacy refresh tokens)."""
+        const_mod = sys.modules["edistribuzione_test_auth.const"]
+        session = _SessioneACoda([_RispostaToken('{"access_token": "nuovo"}')])
+        await auth.AuthClient(session).async_refresh_access_token(
+            "rt", const_mod.OAUTH_CLIENT_ID_PRECEDENTE
+        )
+        assert session.post_inviati[0]["data"]["client_id"] == const_mod.OAUTH_CLIENT_ID_PRECEDENTE
+        assert session.post_inviati[0]["headers"] == {"Accept": "application/json"}
 
     async def test_refresh_con_una_pagina_html_qualunque_e_un_parsing_error(self):
         session = _SessioneACoda([_RispostaToken("<html>manutenzione</html>")])
@@ -827,30 +866,28 @@ class TestErroriToken:
             [
                 _RispostaToken(APP_BLOCKED, status=400),
                 _RispostaToken(APP_BLOCKED, status=400),
-                _RispostaToken(APP_BLOCKED, status=400),
             ]
         )
         with pytest.raises(auth.AppBloccata) as errore:
             await auth.AuthClient(session).async_refresh_access_token("rt")
         assert not isinstance(errore.value, auth.TokenNonValido)
-        assert len(session.post_inviati) == 3
+        assert len(session.post_inviati) == 2
 
-    async def test_antibot_poi_app_blocked_su_tutti_i_fallback(self):
-        """Imperva blocks the main domain and both fallback hosts return app_blocked."""
+    async def test_app_blocked_sul_diretto_poi_antibot_sul_portale_propaga_app_blocked(self):
+        """When the direct org host returns app_blocked and the portal fallback returns
+        Imperva antibot, the more informative primary error (AppBloccata) is preserved."""
         session = _SessioneACoda(
             [
+                _RispostaToken(APP_BLOCKED, status=400),
                 _RispostaToken(PAGINA_ANTIBOT),
-                _RispostaToken(APP_BLOCKED, status=400),
-                _RispostaToken(APP_BLOCKED, status=400),
             ]
         )
         with pytest.raises(auth.AppBloccata):
             await auth.AuthClient(session).async_refresh_access_token("rt")
         host_provati = [u["url"].split("/")[2] for u in session.post_inviati]
         assert host_provati == [
-            "private.e-distribuzione.it",
             "edistribuzione.my.salesforce.com",
-            "edistribuzione.my.site.com",
+            "private.e-distribuzione.it",
         ]
 
     async def test_invalid_grant_e_un_token_non_valido(self):
@@ -901,3 +938,114 @@ class TestRedirectConErrore:
         with pytest.raises(auth.AppBloccata):
             await auth._get_following_redirects(session, "https://private.e-distribuzione.it/a")
         assert session.get_eseguiti == 1
+
+
+class TestHostLoginAmmessi:
+    def test_elenco_host_ammessi_valido(self):
+        const_mod = sys.modules["edistribuzione_test_auth.const"]
+        assert any(v == "private.e-distribuzione.it" for v in const_mod.HOST_LOGIN_AMMESSI)
+        assert any(v == "edistribuzione.my.salesforce.com" for v in const_mod.HOST_LOGIN_AMMESSI)
+        assert all(v == v.lower() for v in const_mod.HOST_LOGIN_AMMESSI)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://private.e-distribuzione.it/PortaleClienti/s/login/",
+            "https://www.e-distribuzione.it/PortaleClienti/s/login/",
+            "https://edistribuzione.my.salesforce.com/secur/frontdoor.jsp",
+            "https://edistribuzione.my.site.com/PortaleClienti/login",
+            "https://edistribuzione--c.vf.force.com/apex/LoginFlow",
+            "https://edistribuzione.lightning.force.com/apex/LoginFlow",
+            "eneldist://redirect#access_token=abc",
+            "/PortaleClienti/relative",
+        ],
+    )
+    def test_host_e_schemi_ammessi_passano(self, url):
+        auth._verifica_host(url, "test")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://private.e-distribuzione.it/login",
+            "//evil.example.com/phish?sid=SECRET_TOKEN",
+            "ftp://private.e-distribuzione.it/login",
+            "javascript:alert(1)",
+            "https://.salesforce.com/login",
+            "https://evil.site.com/login",
+            "https://attacker.my.site.com/login",
+            "https://attacker.my.salesforce.com/login",
+            "https://attacker.vf.force.com/login",
+            "https://evil.example.com/phish?sid=SECRET_TOKEN",
+            "https://private.e-distribuzione.it.evil.com/login",
+        ],
+    )
+    def test_host_non_ammesso_o_http_viene_rifiutato_senza_loggare_query(self, url, caplog):
+        with caplog.at_level("ERROR"), pytest.raises(auth.HostNonAmmesso) as err:
+            auth._verifica_host(url, "redirect dopo OTP")
+        assert "redirect dopo OTP" in str(err.value)
+        assert "SECRET_TOKEN" not in str(err.value)
+        assert "SECRET_TOKEN" not in caplog.text
+
+    async def test_redirect_verso_host_esterno_viene_bloccato_prima_della_get(self):
+        session = _SessioneRedirect("https://evil.example.com/steal?code=123")
+        with pytest.raises(auth.HostNonAmmesso):
+            await auth._get_following_redirects(
+                session, "https://private.e-distribuzione.it/a", passo="frontdoor"
+            )
+        assert session.get_eseguiti == 1
+
+    @pytest.mark.parametrize(
+        "action",
+        [
+            "https://evil.example.com/capture",
+            "HTTP://evil.example.com/capture",
+            "//evil.example.com/capture",
+        ],
+    )
+    def test_form_otp_verso_host_esterno_viene_rifiutato(self, action):
+        html = (
+            f'<form action="{action}">'
+            '<input type="hidden" name="com.salesforce.visualforce.ViewState" value="VS" />'
+            '<input type="hidden" name="com.salesforce.visualforce.ViewStateVersion" value="1" />'
+            '<input type="hidden" name="com.salesforce.visualforce.ViewStateMAC" value="M" />'
+            '<input type="hidden" name="com.salesforce.visualforce.ViewStateCSRF" value="C" />'
+            "</form>"
+        )
+        with pytest.raises(auth.HostNonAmmesso):
+            auth.AuthClient(None)._analizza_pagina_otp(html)
+
+    async def test_fallback_timeout_preserva_app_blocked_del_primo_host(self):
+        class _SessioneConTimeout(_SessioneACoda):
+            def post(self, url, data=None, headers=None, allow_redirects=None, **kwargs):
+                self.post_inviati.append({"url": url, "data": data, "headers": headers})
+                nxt = self._prossima()
+                if isinstance(nxt, Exception):
+                    raise nxt
+                return nxt
+
+        session = _SessioneConTimeout([_RispostaToken(APP_BLOCKED, status=400), TimeoutError()])
+        with pytest.raises(auth.AppBloccata):
+            await auth.AuthClient(session).async_refresh_access_token("rt")
+        assert len(session.post_inviati) == 2
+
+    async def test_refresh_fallback_su_timeout_o_client_error(self):
+        class _SessioneConErrore(_SessioneACoda):
+            def post(self, url, data=None, headers=None, allow_redirects=None, **kwargs):
+                self.post_inviati.append({"url": url, "data": data, "headers": headers})
+                nxt = self._prossima()
+                if isinstance(nxt, Exception):
+                    raise nxt
+                return nxt
+
+        session_ok = _SessioneConErrore([TimeoutError(), _RispostaToken('{"access_token": "ok"}')])
+        tokens = await auth.AuthClient(session_ok).async_refresh_access_token("rt")
+        assert tokens.access_token == "ok"
+        assert [u["url"].split("/")[2] for u in session_ok.post_inviati] == [
+            "edistribuzione.my.salesforce.com",
+            "private.e-distribuzione.it",
+        ]
+
+        session_fail = _SessioneConErrore([TimeoutError(), _RispostaToken(PAGINA_ANTIBOT)])
+        with pytest.raises(TimeoutError):
+            await auth.AuthClient(session_fail).async_refresh_access_token("rt")
+        assert len(session_fail.post_inviati) == 2

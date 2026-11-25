@@ -250,7 +250,7 @@ def _save_secret_file(path: Path, content: str) -> None:
     os.chmod(path, 0o600)
 
 
-async def _test_refresh_soltanto(auth) -> None:
+async def _test_refresh_soltanto(auth, const) -> None:
     """Test async_refresh_access_token with the token saved from a previous
     login, without redoing email/password/OTP."""
     refresh_token_salvato = REFRESH_TOKEN_FILE.read_text(encoding="utf-8").strip()
@@ -260,15 +260,29 @@ async def _test_refresh_soltanto(auth) -> None:
     async with aiohttp.ClientSession() as session:
         client = auth.AuthClient(session)
         print(f"\n--- Test refresh con il token salvato in {REFRESH_TOKEN_FILE} ---")
-        try:
-            tokens = await client.async_refresh_access_token(refresh_token_salvato)
-        except auth.AuthError as exc:
+        def _stampa_errore_refresh(exc: Exception) -> None:
             print(f"\nREFRESH FALLITO: {exc}")
             print(
                 "Se il messaggio parla di token non valido/scaduto/revocato, il "
                 "refresh_token non è più utilizzabile: serve rifare login+OTP da capo "
                 "(rilancia lo script e rispondi 'n' alla prossima domanda)."
             )
+
+        try:
+            tokens = await client.async_refresh_access_token(
+                refresh_token_salvato, const.OAUTH_CLIENT_ID
+            )
+        except auth.TokenNonValido:
+            print("Token rifiutato con il client nuovo, riprovo con il client precedente...")
+            try:
+                tokens = await client.async_refresh_access_token(
+                    refresh_token_salvato, const.OAUTH_CLIENT_ID_PRECEDENTE
+                )
+            except auth.AuthError as exc:
+                _stampa_errore_refresh(exc)
+                return
+        except auth.AuthError as exc:
+            _stampa_errore_refresh(exc)
             return
         except Exception:
             print("Errore IMPREVISTO durante il refresh (traceback completo sotto):\n")
@@ -301,7 +315,7 @@ async def main() -> None:
             "precedente). Vuoi testare SOLO quello (niente email/password/OTP)? [S/n]: "
         ).strip().lower()
         if scelta in ("", "s", "si", "sì", "y", "yes"):
-            await _test_refresh_soltanto(auth)
+            await _test_refresh_soltanto(auth, const)
             return
         print("Ok, procedo con login completo (email/password/OTP).\n")
 

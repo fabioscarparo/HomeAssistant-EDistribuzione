@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+- **Updated E-Distribuzione app OAuth client**: new setups and re-authentications now use the
+  OAuth client of the updated official E-Distribuzione app (November 2026), which also avoids
+  the extra "Allow / Consenti" screen in most browser logins. Existing installations keep
+  refreshing seamlessly with the previous client until their next sign-in or re-authentication.
+- **Diagnostics client status**: downloaded diagnostics now report whether the integration is
+  already using the updated OAuth client (`client_id_aggiornato`).
+
+### Improved
+- **Direct Salesforce token refresh first**: token refreshes now try
+  `edistribuzione.my.salesforce.com` first (avoiding daily anti-bot warnings on
+  `private.e-distribuzione.it`), falling back to `private.e-distribuzione.it` on blocks or
+  network/timeout errors, sending `Accept: application/json`, and preserving the primary host's
+  error when both fail.
+- **Streamlined browser sign-in**: setup and re-authentication now go straight to browser sign-in
+  while E-Distribuzione blocks automated password/OTP logins. The paste field is now multi-line
+  (preventing truncation on Safari and Firefox) and handles full responses copied from DevTools
+  **Network > RemoteAccessAuthorizationPage.apexp > Response** as well as the Chrome/Edge
+  **Console** line and JSON-escaped redirects.
+- **Fewer API requests and zero idle network calls**:
+  - Outside the configured daily window (default 19:00), once startup data has been attempted,
+    hourly cycles make no token refreshes or API calls.
+  - Consumption-only PODs (where E-Distribuzione reports `HasPlant=False` and no production role
+    or historical injection exists) skip `A2` injection requests on both daily curves and monthly
+    summaries. Note: if you install a generation plant on an existing POD later, injection starts
+    importing automatically once E-Distribuzione updates `HasPlant`; any earlier days can be
+    imported manually with **Fetch history**.
+- **Stricter login host allowlist**: redirects, bridge pages, and forms during automated login
+  are restricted to HTTPS on E-Distribuzione's own domains and Salesforce org hosts
+  (`edistribuzione.*` / `edistribuzione--*`), blocking third-party Salesforce orgs, plain HTTP,
+  and protocol-relative URLs.
+
+### Fixed
+- **Stopped repeated token refresh attempts on blocked startups**: when an expired saved access
+  token hits a blocked refresh during startup auxiliary updates, the cycle now stops after a
+  single refresh attempt instead of retrying across every endpoint and POD.
+- **Prevented hourly auxiliary retries outside the daily window**: persistent API errors or
+  empty official readings on newly activated PODs no longer trigger hourly or midnight requests
+  outside the configured daily window.
+
 ## 1.0.0
 
 First major release, bringing peak power monitoring, supply metadata, official billing readings,

@@ -88,46 +88,50 @@ class _QueuedSession:
 # ---------------------------------------------------------------------------
 
 
-async def test_refresh_fallback_from_app_blocked_to_salesforce_org_host():
-    """If custom domain returns app_blocked, direct org host succeeds."""
+async def test_refresh_tries_salesforce_org_host_first_then_portal_fallback():
+    """Direct Salesforce org host is tried first; falls back to custom portal domain on block."""
     session = _QueuedSession([
         _FakeResp('{"error":"app_blocked","error_description":"Transaction Security"}', 400),
-        _FakeResp('{"access_token":"tok-org","instance_url":"https://edistribuzione.my.salesforce.com"}', 200),
+        _FakeResp('{"access_token":"tok-portal","instance_url":"https://edistribuzione.my.salesforce.com"}', 200),
     ])
     client = AuthClient(session)
     tokens = await client.async_refresh_access_token("rt-1")
-    assert tokens.access_token == "tok-org"
+    assert tokens.access_token == "tok-portal"
     assert tokens.refresh_token == "rt-1"
-    assert client.host_attivo == "edistribuzione.my.salesforce.com"
+    assert client.host_attivo == "private.e-distribuzione.it"
     assert [url for url, _ in session.posts] == [
-        "https://private.e-distribuzione.it/PortaleClienti/services/oauth2/token",
         "https://edistribuzione.my.salesforce.com/services/oauth2/token",
+        "https://private.e-distribuzione.it/PortaleClienti/services/oauth2/token",
     ]
 
 
 async def test_refresh_uses_validated_custom_instance_url():
-    """A valid *.salesforce.com instance_url is used as the direct token host."""
+    """A valid edistribuzione*.salesforce.com instance_url is used first as direct token host."""
     session = _QueuedSession([
-        _FakeResp("<html>Pardon Our Interruption</html>", 403),
         _FakeResp('{"access_token":"tok-custom"}', 200),
     ])
-    client = AuthClient(session, instance_url="https://custom-org.my.salesforce.com")
+    client = AuthClient(session, instance_url="https://edistribuzione--eu1.my.salesforce.com")
     tokens = await client.async_refresh_access_token("rt-1")
     assert tokens.access_token == "tok-custom"
-    assert client.host_attivo == "custom-org.my.salesforce.com"
-    assert session.posts[1][0] == "https://custom-org.my.salesforce.com/services/oauth2/token"
+    assert client.host_attivo == "edistribuzione--eu1.my.salesforce.com"
+    assert session.posts[0][0] == (
+        "https://edistribuzione--eu1.my.salesforce.com/services/oauth2/token"
+    )
 
 
-async def test_refresh_ignores_untrusted_instance_url():
-    """Untrusted instance_url values fall back to SF_HOST_TOKEN."""
+@pytest.mark.parametrize(
+    "untrusted_url",
+    ["https://evil.example.com", "https://attacker-org.my.salesforce.com"],
+)
+async def test_refresh_ignores_untrusted_instance_url(untrusted_url):
+    """Untrusted or third-party Salesforce org instance_urls fall back to SF_HOST_TOKEN."""
     session = _QueuedSession([
-        _FakeResp("<html>Pardon Our Interruption</html>", 403),
         _FakeResp('{"access_token":"tok-safe"}', 200),
     ])
-    client = AuthClient(session, instance_url="https://evil.example.com")
+    client = AuthClient(session, instance_url=untrusted_url)
     tokens = await client.async_refresh_access_token("rt-1")
     assert tokens.access_token == "tok-safe"
-    assert session.posts[1][0] == "https://edistribuzione.my.salesforce.com/services/oauth2/token"
+    assert session.posts[0][0] == "https://edistribuzione.my.salesforce.com/services/oauth2/token"
 
 
 async def test_refresh_invalid_grant_does_not_retry_other_hosts():
@@ -502,6 +506,184 @@ async def test_coordinator_skips_reactive_when_opt_in_disabled(hass, make_edist_
     await coord._async_aggiorna_mensili(POD_A, date(2026, 11, 19))
     mags = [c.kwargs["magnitude"] for c in coord._api.async_get_monthly_time_of_use.await_args_list]
     assert mags == [MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA]
+
+
+async def test_coordinator_skips_a2_when_has_plant_is_false(hass, make_edist_coordinator):
+    """Consumption-only POD (HasPlant=False) skips A2 in both daily curves and monthly TOU."""
+    coord = make_edist_coordinator(pods=[POD_A], data={CONF_ACCESS_TOKEN: "tok-live"})
+    coord._api.update_token("tok-live")
+    coord.forniture[POD_A] = {"ha_impianto": False}
+    coord._api.async_get_daily_load_profile = AsyncMock(return_value=[])
+    coord._api.async_get_monthly_time_of_use = AsyncMock(return_value=[])
+
+    await coord._async_importa_periodo(POD_A, date(2026, 11, 18), date(2026, 11, 18))
+    await coord._async_aggiorna_mensili(POD_A, date(2026, 11, 19))
+
+    assert [
+        c.kwargs["magnitude"] for c in coord._api.async_get_daily_load_profile.await_args_list
+    ] == [MAGNITUDE_PRELEVATA]
+    assert [
+        c.kwargs["magnitude"] for c in coord._api.async_get_monthly_time_of_use.await_args_list
+    ] == [MAGNITUDE_PRELEVATA]
+
+
+async def test_coordinator_keeps_a2_on_production_or_historical_injection_even_if_has_plant_false(
+    hass, make_edist_coordinator
+):
+    coord_prod = make_edist_coordinator(
+        pods=[POD_A],
+        data={CONF_ACCESS_TOKEN: "tok-live"},
+        options={CONF_TIPO_POD: {POD_A: TIPO_POD_PRODUZIONE}},
+    )
+    coord_prod.forniture[POD_A] = {"ha_impianto": False}
+    assert coord_prod._magnitudes_attive(POD_A) == (MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA)
+
+    coord_hist = make_edist_coordinator(pods=[POD_A], data={CONF_ACCESS_TOKEN: "tok-live"})
+    coord_hist.forniture[POD_A] = {"ha_impianto": False}
+    coord_hist.riepilogo[POD_A] = {
+        "ultimo_giorno": {MAGNITUDE_IMMESSA: {"giorno": "2026-11-18", "kwh": 2.5}}
+    }
+    assert coord_hist._magnitudes_attive(POD_A) == (MAGNITUDE_PRELEVATA, MAGNITUDE_IMMESSA)
+
+
+async def test_coordinator_idle_hour_makes_no_token_or_api_calls(hass, make_edist_coordinator):
+    """After midnight when curves are not due and auxiliaries are loaded, zero network calls run."""
+    coord = make_edist_coordinator(pods=[POD_A])
+    coord.forniture[POD_A] = {"ha_impianto": False}
+    coord.mensili[POD_A] = {}
+    coord.letture_ufficiali[POD_A] = {"data_lettura": "2026-11-01"}
+    coord._async_ensure_token = AsyncMock()
+    coord._prossima_richiesta = AsyncMock(return_value=None)
+    coord._api.async_get_supplies = AsyncMock()
+    coord.async_aggiorna_riepilogo = AsyncMock(return_value={})
+
+    with freeze_time("2026-11-20 01:00:00+01:00"):
+        await coord._async_update_data()
+
+    coord._async_ensure_token.assert_not_awaited()
+    coord._api.async_get_supplies.assert_not_awaited()
+
+
+async def test_coordinator_blocked_refresh_on_pre_curve_supplies_stops_cycle_after_one_attempt(
+    hass, make_edist_coordinator
+):
+    """Expired token + blocked refresh during evening supplies fetch aborts after 1 refresh."""
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    from custom_components.edistribuzione.api import ApiError
+    from custom_components.edistribuzione.auth import AppBloccata
+
+    coord = make_edist_coordinator(pods=[POD_A], data={CONF_ACCESS_TOKEN: "expired"})
+    coord._prossima_richiesta = AsyncMock(
+        return_value=(date(2026, 11, 18), date(2026, 11, 18))
+    )
+    coord._api.async_get_supplies = AsyncMock(side_effect=ApiError("401", status=401))
+    coord._api.async_get_daily_load_profile = AsyncMock()
+    coord._auth.async_refresh_access_token = AsyncMock(side_effect=AppBloccata("app_blocked"))
+
+    with freeze_time("2026-11-19 20:00:00+01:00"), pytest.raises(UpdateFailed):
+        await coord._async_update_data()
+
+    assert coord._auth.async_refresh_access_token.await_count == 1
+    coord._api.async_get_daily_load_profile.assert_not_awaited()
+
+
+async def test_coordinator_ausiliari_stop_on_first_blocked_refresh(hass, make_edist_coordinator):
+    """Startup with expired token + blocked refresh must attempt refresh ONCE, not per endpoint."""
+    from custom_components.edistribuzione.api import ApiError
+    from custom_components.edistribuzione.auth import AppBloccata
+
+    coord = make_edist_coordinator(
+        pods=[POD_A, POD_B],
+        data={CONF_ACCESS_TOKEN: "expired"},
+        options={CONF_ENERGIA_REATTIVA: True},
+    )
+    coord._prossima_richiesta = AsyncMock(return_value=None)
+    coord._api.async_get_supplies = AsyncMock(side_effect=ApiError("401", status=401))
+    coord._api.async_get_monthly_time_of_use = AsyncMock(side_effect=ApiError("401", status=401))
+    coord._api.async_get_reading = AsyncMock(side_effect=ApiError("401", status=401))
+    coord._auth.async_refresh_access_token = AsyncMock(side_effect=AppBloccata("app_blocked"))
+    coord.async_aggiorna_riepilogo = AsyncMock(return_value={})
+
+    with freeze_time("2026-11-20 10:00:00+01:00"):
+        await coord._async_update_data()
+
+    assert coord._auth.async_refresh_access_token.await_count == 1
+    coord._api.async_get_monthly_time_of_use.assert_not_awaited()
+    coord._api.async_get_reading.assert_not_awaited()
+    assert coord.accesso_bloccato is True
+
+
+async def test_coordinator_pod_without_readings_does_not_wake_up_at_midnight(
+    hass, make_edist_coordinator
+):
+    """If /reading returned [] on day 1, day 2 at 00:30 must stay completely idle."""
+    coord = make_edist_coordinator(pods=[POD_A], data={CONF_ACCESS_TOKEN: "tok-live"})
+    coord._api.update_token("tok-live")
+    coord._api.async_get_supplies = AsyncMock(return_value=[{"IdPod": POD_A, "HasPlant": False}])
+    coord._api.async_get_monthly_time_of_use = AsyncMock(return_value=[])
+    coord._api.async_get_reading = AsyncMock(return_value=[])
+    coord._prossima_richiesta = AsyncMock(return_value=None)
+    coord.async_aggiorna_riepilogo = AsyncMock(return_value={})
+
+    # Day 1 startup: loads auxiliaries once (reading returns [], so letture_ufficiali stays empty).
+    with freeze_time("2026-11-19 10:00:00+01:00"):
+        await coord._async_update_data()
+    assert POD_A not in coord.letture_ufficiali
+    assert coord._api.async_get_reading.await_count == 1
+
+    # Day 2 at 00:30 (before evening window): zero token or API calls.
+    coord._async_ensure_token = AsyncMock()
+    coord._api.async_get_supplies.reset_mock()
+    coord._api.async_get_monthly_time_of_use.reset_mock()
+    coord._api.async_get_reading.reset_mock()
+
+    with freeze_time("2026-11-20 00:30:00+01:00"):
+        await coord._async_update_data()
+
+    coord._async_ensure_token.assert_not_awaited()
+    coord._api.async_get_supplies.assert_not_awaited()
+    coord._api.async_get_monthly_time_of_use.assert_not_awaited()
+    coord._api.async_get_reading.assert_not_awaited()
+
+
+async def test_coordinator_persistent_auxiliary_api_error_does_not_retry_hourly(
+    hass, make_edist_coordinator
+):
+    """If auxiliary endpoints fail with ApiError at startup, later idle hours must not retry."""
+    from custom_components.edistribuzione.api import ApiError
+
+    coord = make_edist_coordinator(pods=[POD_A], data={CONF_ACCESS_TOKEN: "tok-live"})
+    coord._api.update_token("tok-live")
+    coord._api.async_get_supplies = AsyncMock(side_effect=ApiError("HTTP 500", status=500))
+    coord._api.async_get_monthly_time_of_use = AsyncMock(
+        side_effect=ApiError("HTTP 500", status=500)
+    )
+    coord._api.async_get_reading = AsyncMock(side_effect=ApiError("HTTP 500", status=500))
+    coord._prossima_richiesta = AsyncMock(return_value=None)
+    coord.async_aggiorna_riepilogo = AsyncMock(return_value={})
+
+    # Startup cycle (10:00): tries auxiliaries once, all fail with ApiError.
+    with freeze_time("2026-11-20 10:00:00+01:00"):
+        await coord._async_update_data()
+    assert coord._api.async_get_supplies.await_count == 1
+    assert coord._api.async_get_reading.await_count == 1
+
+    # Next idle hours (11:00, 12:00): zero retries until the evening window.
+    coord._async_ensure_token = AsyncMock()
+    coord._api.async_get_supplies.reset_mock()
+    coord._api.async_get_monthly_time_of_use.reset_mock()
+    coord._api.async_get_reading.reset_mock()
+
+    with freeze_time("2026-11-20 11:00:00+01:00"):
+        await coord._async_update_data()
+    with freeze_time("2026-11-20 12:00:00+01:00"):
+        await coord._async_update_data()
+
+    coord._async_ensure_token.assert_not_awaited()
+    coord._api.async_get_supplies.assert_not_awaited()
+    coord._api.async_get_monthly_time_of_use.assert_not_awaited()
+    coord._api.async_get_reading.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

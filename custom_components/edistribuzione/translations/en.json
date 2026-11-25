@@ -27,12 +27,12 @@
       },
       "browser_login": {
         "title": "Sign in from the browser",
-        "description": "Sign in to E-Distribuzione from your browser and paste here the address it ends on. Your password does not go through Home Assistant.{pod_correnti}\n\n1. On a computer, open [E-Distribuzione's website]({login_url}) and sign in with the account of your PODs, OTP code included, until you are in the customer area. If the browser is already signed in with another account, sign out first; if it is signed in with the right one, go to step 2. Do not use a phone with the E-Distribuzione app: the app would open the final address.\n2. In the same window, open [the authorization link]({authorization_url}). The page stays blank or shows an error: that is expected, the final address is meant for the app.\n3. Copy that address, which starts with `eneldist://redirect`. In Chrome and Edge open the developer tools (F12, or ⌥⌘J on a Mac) and copy from the Console tab the red line that contains it; in other browsers it may show in the address bar. You can paste the whole line.\n4. Paste it below and submit. The authorization link only works for this setup.",
+        "description": "Sign in to E-Distribuzione from your browser and paste here the authorization address or response. Your password does not go through Home Assistant.{pod_correnti}\n\n1. On a **computer**, open [E-Distribuzione's website]({login_url}) and sign in with the account of your PODs, OTP code included, until you are in the customer area. If the browser is already signed in with another account, sign out first; if it is signed in with the right one, go to step 2. Do not use a phone with the E-Distribuzione app: the app would open the final address.\n2. In the **same window**, **before** opening the second link, open developer tools (**F12**, or **⌥⌘I** on Mac), go to the **Network** tab and tick **Preserve log**. Then open [the authorization link]({authorization_url}). If an **Allow / Consenti** button appears, click it (usually it does not appear). The page stays blank or shows an error and the address bar does not change: that is expected.\n3. Copy the `eneldist://redirect` text: in the **Network** tab click **RemoteAccessAuthorizationPage.apexp** (status 200; or the POST **AuthorizationPage** request if you clicked Allow/Consenti), open the **Response** tab and copy all of its text. Alternatively, in the **Console** tab copy the red line `Failed to launch 'eneldist://redirect...'`. If the browser asks to open an app, cancel it.\n4. Paste it below and submit. The authorization link only works for this setup.",
         "data": {
-          "redirect_url": "eneldist://redirect address"
+          "redirect_url": "eneldist://redirect address or Response body"
         },
         "data_description": {
-          "redirect_url": "The address starting with eneldist://redirect, or the whole console line that contains it."
+          "redirect_url": "The address starting with eneldist://redirect, the entire Response tab text, or the red Console line containing it. It contains your access tokens: do not share screenshots of this filled field."
         }
       },
       "otp": {
@@ -66,16 +66,16 @@
       "risposta_inattesa": "E-Distribuzione gave an unexpected answer during sign-in ({messaggio}). It does not depend on your credentials: the portal may be under maintenance or may have changed. Try again later; if it keeps happening, open an issue on GitHub with the log attached.",
       "errore_imprevisto": "Unexpected error during sign-in ({messaggio}). The details are in the Home Assistant log: try again, and if it happens again open an issue on GitHub with the log attached.",
       "otp_formato": "The OTP code is made of digits only: check that you copied all of it, with no letters.",
-      "browser_url_mancante": "The pasted text contains no address starting with eneldist://redirect. Copy the one shown after signing in, not the link on this page.",
+      "browser_url_mancante": "The pasted text contains no address starting with eneldist://redirect. Open developer tools (F12) with the Network tab and \"Preserve log\" enabled before opening the authorization link, then copy the Response tab of RemoteAccessAuthorizationPage.apexp (or the red Console line).",
       "browser_negato": "E-Distribuzione refused the authorization (\"{messaggio}\"). Open the authorization link again; if it happens again, try later.",
       "browser_altro_link": "The pasted address belongs to another sign-in link, for example from an earlier attempt. Open the authorization link on this page and paste the address you get.",
-      "browser_token_mancanti": "The pasted address is missing some data ({messaggio}): it was probably only partly copied. Copy all of it, to the end of the line."
+      "browser_token_mancanti": "The pasted address is missing some data ({messaggio}): it was probably only partly copied. Copy all the text from the Response tab, or the whole Console line."
     },
     "abort": {
       "already_configured": "This E-Distribuzione account is already configured. To add more PODs, use the integration options.",
       "reauth_successful": "Credentials updated successfully",
       "no_pods_found": "No POD found for this account",
-      "supplies_failed": "Unexpected error while retrieving the PODs from the account. Start the setup again from the beginning (login and OTP included).",
+      "supplies_failed": "Unexpected error while retrieving the PODs from the account. Check Home Assistant's internet connection and start the setup again from the beginning with a new authorization link.",
       "otp_exchange_failed": "The OTP code was accepted but completing the login failed. Start the setup again from the beginning (login and OTP included).",
       "accesso_bloccato": "E-Distribuzione is currently blocking automated access with an anti-bot check, so the integration cannot sign in. It does not depend on your credentials: try again later, without insisting.",
       "app_bloccata": "After the OTP code, E-Distribuzione rejected the official app's client the integration uses to sign in (\"app_blocked\" answer). It does not depend on your credentials or on the code: try the setup again later.",
@@ -96,7 +96,7 @@
       },
       "tipo_pod": {
         "title": "Meter type per POD",
-        "description": "A+/A- describe what E-Distribuzione measures (consumption/injection): both are always fetched for every POD. The type below only describes the role of that meter in your system, and only changes the names shown in the Energy Dashboard. You can change it at any time, no new import needed."
+        "description": "A+/A- describe what E-Distribuzione measures (consumption/injection): consumption is always fetched, while injection is fetched for PODs with a generation plant or set as a production meter. The type below describes the role of that meter in your system and updates the labels in the Energy Dashboard; you can change it at any time."
       },
       "aggiungi_pod": {
         "title": "Add POD",
@@ -397,7 +397,7 @@
   "services": {
     "recupera_storico": {
       "name": "Fetch history",
-      "description": "Requests both energy directions (consumption and injection) for a past period from E-Distribuzione and imports them (up to 365 days per run). History is not fetched automatically: you decide when and how much to fetch. For longer periods, repeat the action over consecutive ranges.",
+      "description": "Requests consumption (and injection for PODs with a generation plant or production meters) for a past period from E-Distribuzione and imports it (up to 365 days per run). History is not fetched automatically: you decide when and how much to fetch. For longer periods, repeat the action over consecutive ranges.",
       "fields": {
         "device_id": {
           "name": "Setup / POD",

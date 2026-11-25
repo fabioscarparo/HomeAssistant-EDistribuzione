@@ -1,10 +1,10 @@
 recupera_storico:
   name: Fetch history
   description: >-
-    Requests both energy directions (consumption and injection) for a past
-    period from E-Distribuzione and imports them (up to 365 days per run).
-    History is not fetched automatically: repeat the action over consecutive
-    ranges for longer periods.
+    Requests consumption (and injection for PODs with a generation plant or
+    production meters) for a past period from E-Distribuzione and imports it
+    (up to 365 days per run). History is not fetched automatically: repeat the
+    action over consecutive ranges for longer periods.
   fields:
     device_id:
       name: Setup / POD

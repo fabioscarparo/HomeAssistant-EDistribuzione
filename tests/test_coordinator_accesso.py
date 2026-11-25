@@ -25,12 +25,15 @@ from custom_components.edistribuzione.auth import (
 )
 from custom_components.edistribuzione.const import (
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID_OAUTH,
     CONF_INSTANCE_URL,
     CONF_PODS,
     CONF_REFRESH_TOKEN,
     DOMAIN,
     ISSUE_ACCESSO_BLOCCATO,
     ISSUE_APP_BLOCCATA,
+    OAUTH_CLIENT_ID,
+    OAUTH_CLIENT_ID_PRECEDENTE,
     issue_id_per_entry,
 )
 
@@ -68,9 +71,20 @@ async def test_401_rinnova_token_e_riprova_la_richiesta(make_edist_coordinator):
     )
 
     assert risultato == [{"sample": "lettura"}]
-    coordinator._auth.async_refresh_access_token.assert_awaited_once_with("rt")
+    coordinator._auth.async_refresh_access_token.assert_awaited_once_with(
+        "rt", OAUTH_CLIENT_ID_PRECEDENTE
+    )
     coordinator._api.update_token.assert_called_once_with("access-nuovo")
     assert coordinator._api.async_get_daily_load_profile.await_count == 2
+
+
+async def test_refresh_usa_client_id_salvato_sulla_entry(make_edist_coordinator):
+    coordinator = make_edist_coordinator(data={CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID})
+    coordinator._auth.async_refresh_access_token = AsyncMock(
+        return_value=SimpleNamespace(access_token="access-nuovo", refresh_token="rt")
+    )
+    await coordinator._async_ensure_token()
+    coordinator._auth.async_refresh_access_token.assert_awaited_once_with("rt", OAUTH_CLIENT_ID)
 
 
 async def test_il_token_salvato_non_cancella_l_avviso_di_blocco(hass, make_edist_coordinator):

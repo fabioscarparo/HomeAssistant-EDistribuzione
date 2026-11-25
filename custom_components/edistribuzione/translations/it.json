@@ -27,12 +27,12 @@
       },
       "browser_login": {
         "title": "Accedi dal browser",
-        "description": "Accedi a E-Distribuzione dal browser e incolla qui l'indirizzo che ne esce. La password non passa da Home Assistant.{pod_correnti}\n\n1. Da un computer, apri [il sito di E-Distribuzione]({login_url}) e accedi con l'account dei tuoi POD, codice OTP compreso, fino all'area clienti. Se nel browser sei già entrato con un altro account, esci prima; se sei già entrato con quello giusto, passa al punto 2. Non usare un telefono con l'app E-Distribuzione: aprirebbe lei l'indirizzo finale.\n2. Nella stessa finestra apri [il link di autorizzazione]({authorization_url}). La pagina resta bianca o mostra un errore: è normale, l'indirizzo finale è pensato per l'app.\n3. Copia quell'indirizzo, che inizia con `eneldist://redirect`. In Chrome ed Edge apri gli strumenti per sviluppatori (F12, oppure ⌥⌘J su Mac) e nella scheda Console copia la riga rossa che lo contiene; in altri browser può comparire nella barra degli indirizzi. Puoi incollare la riga intera.\n4. Incollalo qui sotto e invia. Il link di autorizzazione vale solo per questa configurazione.",
+        "description": "Accedi a E-Distribuzione dal browser e incolla qui l'indirizzo o la risposta di autorizzazione. La password non passa da Home Assistant.{pod_correnti}\n\n1. Da un **computer**, apri [il sito di E-Distribuzione]({login_url}) e accedi con l'account dei tuoi POD, codice OTP compreso, fino all'area clienti. Se nel browser sei già entrato con un altro account, esci prima; se sei già entrato con quello giusto, passa al punto 2. Non usare un telefono con l'app E-Distribuzione: aprirebbe lei l'indirizzo finale.\n2. Nella **stessa finestra**, **prima** di aprire il secondo link, apri gli strumenti per sviluppatori (**F12**, oppure **⌥⌘I** su Mac), vai nella scheda **Network** (Rete) e spunta **Preserve log** (Mantieni log). Poi apri [il link di autorizzazione]({authorization_url}). Se compare **Consenti**, premilo (di solito non compare). La pagina resta bianca o mostra un errore e la barra degli indirizzi non cambia: è normale.\n3. Copia l'indirizzo `eneldist://redirect`: nella scheda **Network** clicca la richiesta **RemoteAccessAuthorizationPage.apexp** (stato 200; oppure la richiesta POST **AuthorizationPage** se hai premuto Consenti), apri la scheda **Response** (Risposta) e copia tutto il testo. In alternativa, nella scheda **Console** può comparire una riga rossa `Failed to launch 'eneldist://redirect...'`: copiala intera. Se il browser chiede di aprire un'app, annulla.\n4. Incolla il testo qui sotto e invia. Il link di autorizzazione vale solo per questa configurazione.",
         "data": {
-          "redirect_url": "Indirizzo eneldist://redirect"
+          "redirect_url": "Indirizzo eneldist://redirect o risposta Response"
         },
         "data_description": {
-          "redirect_url": "L'indirizzo che inizia con eneldist://redirect, oppure l'intera riga della console che lo contiene."
+          "redirect_url": "L'indirizzo che inizia con eneldist://redirect, l'intera risposta della scheda Response oppure la riga rossa della Console. Contiene i tuoi token di accesso: non condividere screenshot di questo campo compilato."
         }
       },
       "otp": {
@@ -66,16 +66,16 @@
       "risposta_inattesa": "E-Distribuzione ha risposto in modo inatteso durante l'accesso ({messaggio}). Non dipende dalle tue credenziali: il portale potrebbe essere in manutenzione o essere cambiato. Riprova più tardi; se continua, apri una segnalazione su GitHub allegando il log.",
       "errore_imprevisto": "Errore imprevisto durante l'accesso ({messaggio}). I dettagli sono nel log di Home Assistant: riprova, e se si ripete apri una segnalazione su GitHub allegandolo.",
       "otp_formato": "Il codice OTP è fatto solo di cifre: controlla di averlo copiato per intero, senza lettere.",
-      "browser_url_mancante": "Nel testo incollato non c'è un indirizzo che inizia con eneldist://redirect. Copia quello che compare dopo l'accesso, non il link di questa pagina.",
+      "browser_url_mancante": "Nel testo incollato non c'è un indirizzo che inizia con eneldist://redirect. Apri gli strumenti per sviluppatori (F12) con Network e \"Preserve log\" attivi prima di aprire il link di autorizzazione, poi copia il testo dalla scheda Response di RemoteAccessAuthorizationPage.apexp (o la riga rossa della Console).",
       "browser_negato": "E-Distribuzione ha rifiutato l'autorizzazione («{messaggio}»). Riapri il link di autorizzazione; se si ripete, riprova più tardi.",
       "browser_altro_link": "L'indirizzo incollato appartiene a un altro link di accesso, per esempio di un tentativo precedente. Apri il link di autorizzazione di questa pagina e incolla l'indirizzo che ottieni.",
-      "browser_token_mancanti": "Nell'indirizzo incollato mancano dei dati ({messaggio}): probabilmente è stato copiato solo in parte. Copialo per intero, fino alla fine della riga."
+      "browser_token_mancanti": "Nell'indirizzo incollato mancano dei dati ({messaggio}): probabilmente è stato copiato solo in parte. Copia tutto il testo dalla scheda Response, oppure l'intera riga della Console."
     },
     "abort": {
       "already_configured": "Questo account E-Distribuzione è già configurato. Per aggiungere altri POD usa le opzioni dell'integrazione.",
       "reauth_successful": "Credenziali aggiornate con successo",
       "no_pods_found": "Nessun POD trovato per questo account",
-      "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova la configurazione da capo (login + OTP inclusi).",
+      "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Controlla la connessione a internet di Home Assistant e riprova la configurazione da capo con un nuovo link di autorizzazione.",
       "otp_exchange_failed": "Il codice OTP è stato accettato ma il completamento dell'accesso è fallito. Riprova la configurazione da capo (login + OTP inclusi).",
       "accesso_bloccato": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot, quindi l'integrazione non riesce ad accedere. Non dipende dalle tue credenziali: riprova più tardi, senza insistere.",
       "app_bloccata": "Dopo il codice OTP E-Distribuzione ha rifiutato il client dell'app ufficiale che l'integrazione usa per accedere (risposta «app_blocked»). Non dipende dalle tue credenziali né dal codice: riprova la configurazione più tardi.",
@@ -96,7 +96,7 @@
       },
       "tipo_pod": {
         "title": "Tipo di contatore per POD",
-        "description": "A+/A- descrivono cosa misura E-Distribuzione (prelevata/immessa): restano sempre entrambe acquisite per ogni POD. Il tipo qui sotto descrive solo il ruolo di quel contatore nel tuo impianto, e cambia unicamente i nomi mostrati nella Energy Dashboard - modificabile in ogni momento, non richiede un nuovo import."
+        "description": "A+/A- descrivono cosa misura E-Distribuzione (prelevata/immessa): il prelievo è sempre scaricato, mentre l'immissione viene scaricata per i POD con impianto di produzione o configurati come contatore di produzione. Il tipo qui sotto descrive il ruolo di quel contatore nel tuo impianto e cambia i nomi mostrati nella Energy Dashboard - modificabile in ogni momento."
       },
       "aggiungi_pod": {
         "title": "Aggiungi POD",
@@ -397,7 +397,7 @@
   "services": {
     "recupera_storico": {
       "name": "Recupera storico",
-      "description": "Richiede a E-Distribuzione entrambe le direzioni dell'energia (prelevata e immessa) per un periodo passato e le importa (fino a 365 giorni per esecuzione). Il recupero dello storico non è automatico: sei tu a decidere quando e quanto recuperare. Per periodi più lunghi ripeti l'azione su intervalli consecutivi.",
+      "description": "Richiede a E-Distribuzione il prelievo (e l'immissione sui POD con impianto o di produzione) per un periodo passato e lo importa (fino a 365 giorni per esecuzione). Il recupero dello storico non è automatico: sei tu a decidere quando e quanto recuperare. Per periodi più lunghi ripeti l'azione su intervalli consecutivi.",
       "fields": {
         "device_id": {
           "name": "Configurazione / POD",

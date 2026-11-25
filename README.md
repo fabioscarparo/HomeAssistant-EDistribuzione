@@ -63,9 +63,11 @@ From then on new data arrives every evening on its own, see
 - Access to the email address or phone number where the OTP code arrives
 
 > [!IMPORTANT]
-> Log out of the official E-Distribuzione app and website before setting up
-> the integration. E-Distribuzione limits the number of concurrent sessions
-> per account, and with too many open it sends no OTP code.
+> E-Distribuzione limits the number of concurrent sessions per account, and
+> with too many open it sends no OTP code. Before setting up the integration,
+> log out of the official E-Distribuzione app and the website on other
+> devices or browsers: during setup, sign in on the website from one browser
+> only.
 
 ### Install with HACS
 
@@ -99,61 +101,58 @@ integration domain is the same, so the existing setup and data are kept.
 ## Sign in
 
 Go to **Settings → Devices & services → Add integration** and search for
-**E-Distribuzione**; if it does not appear, reload the page. Then choose how
-to sign in:
+**E-Distribuzione**; if it does not appear, reload the page.
 
-- **Continue in browser (recommended)**: you sign in on E-Distribuzione's
-  official website, which the block on automated access does not stop, and
-  your password does not go through Home Assistant.
-- **Use password and OTP**: Home Assistant signs in for you, with the email
-  and password of your customer area and the OTP code you receive by email or
-  SMS. E-Distribuzione can block it with its anti-bot check: the setup then
-  offers the browser.
-
-After signing in, choose the PODs to monitor if the account has more than
-one. If something goes wrong, see [Sign-in errors](#sign-in-errors).
+Setup signs in through your browser: you sign in on E-Distribuzione's official
+website (which E-Distribuzione's anti-bot check on automated logins does not
+block), and your password never passes through Home Assistant. After signing
+in, choose the PODs to monitor if the account has more than one. If something
+goes wrong, see [Sign-in errors](#sign-in-errors).
 
 ### Sign in from the browser
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/sign-in-browser-dark.svg">
-  <img alt="Signing in from the browser in four steps: sign in on E-Distribuzione's website, open the authorization link in the same window, copy the red eneldist://redirect line from the Console, paste it into Home Assistant" src="docs/images/sign-in-browser-light.svg">
+  <img alt="Signing in from the browser in four steps (showing the Chrome/Edge Console shortcut; the Network Response method works in all browsers)" src="docs/images/sign-in-browser-light.svg">
 </picture>
 
-1. On a computer, open the first link shown in the setup, E-Distribuzione's
+*The illustration shows the Chrome/Edge Console shortcut; the Network Response method in steps 2 and 3 below works in all browsers.*
+
+1. On a **computer**, open the first link shown in the setup, E-Distribuzione's
    website, and sign in with the account of your PODs, OTP code included,
    until you are in the customer area. If the browser is already signed in
    with another account, sign out first. Do not use a phone with the
    E-Distribuzione app: the app would open the final address.
-2. In the same window, open the second link, the authorization link. The
-   page stays blank or shows an error: that is expected, the final address
-   is meant for the app.
-3. Copy that address, which starts with `eneldist://redirect`. In Chrome and
-   Edge open the developer tools (**F12**, or **⌥⌘J** on a Mac) and copy
-   from the **Console** tab the red line that contains it; in other browsers
-   it may show in the address bar. You can paste the whole line.
+2. In the **same window**, **before** opening the second link, open developer
+   tools (**F12**, or **⌥⌘I** on Mac), switch to the **Network** tab and tick
+   **Preserve log**. Then open the second link (the authorization link). If an
+   **Allow / Consenti** button appears, click it (usually it does not appear).
+   If the browser prompts to open an app, cancel it. The page stays blank or
+   shows an error and the address bar does not change: that is expected, the
+   final address is meant for the app.
+3. Copy the `eneldist://redirect` text from developer tools: in the **Network**
+   tab click **RemoteAccessAuthorizationPage.apexp** (status 200; or the POST
+   **AuthorizationPage** request if you clicked Allow/Consenti), open the
+   **Response** tab and copy all of its text (the integration extracts the
+   address automatically). Alternatively, in Chrome and Edge the **Console** tab
+   may show a red line `Failed to launch 'eneldist://redirect...'`: you can
+   copy that whole line instead.
 4. Paste it into the setup and submit.
 
 The authorization link only works for the setup that showed it.
 
-### Sign in with password and OTP
-
-Only use the code that arrives after submitting your credentials here:
-codes generated in the E-Distribuzione app or on the website belong to a
-different login session and are always rejected.
-
-- **No OTP code?** Tick **Request a new code**, leave the code field empty
-  and submit the form.
-- **Too many concurrent sessions?** Log out of the official app and website,
-  wait a few minutes and try again.
-
 ## PODs and meter role
 
-Each POD has a role, which only changes how entities and statistics are
-named. **Both directions are always downloaded for every POD**, whatever its
-role. During initial setup the role is suggested automatically from
-E-Distribuzione's `MeteringPointType` (`M1` exchange vs `M2` production), and
-can always be changed later in **Configure -> Meter type per POD**.
+Each POD has a role, which controls how entities and statistics are named and
+linked in the Energy Dashboard. Consumption (`A1`) is always downloaded, while
+injection (`A2`) is downloaded automatically for production meters and PODs
+with a generation plant (`HasPlant`), avoiding unnecessary API calls on
+consumption-only meters. If you add a generation plant later, injection starts
+importing automatically once E-Distribuzione updates `HasPlant` (earlier days
+can be fetched with **Fetch history**). During initial setup the role is
+suggested automatically from E-Distribuzione's `MeteringPointType` (`M1`
+exchange vs `M2` production), and can always be changed later in **Configure →
+Meter type per POD**.
 
 - **Regular / exchange meter**: the main electricity meter, the default.
 - **Solar / production meter**: a meter dedicated to photovoltaic
@@ -229,8 +228,10 @@ is not set up yet, or Home Assistant was not restarted after installing it.
 
 E-Distribuzione publishes data with a **one-day delay**. Every day from
 **19:00** the integration requests the previous days, always rechecking the
-last **3 days** so that later corrections are imported automatically. You
-can change the hour in **Configure → Request time**.
+last **3 days** so that later corrections are imported automatically, and
+updates supply metadata, monthly peaks, and official readings in the same
+daily window (avoiding unnecessary API requests and token refreshes during
+idle hours). You can change the hour in **Configure → Request time**.
 
 The sensors of each POD device expose supply metadata, 15-minute peak power
 and diagnostic dates:
@@ -388,22 +389,25 @@ show_injection: true
 
 ### Sign-in errors
 
-When E-Distribuzione refuses the sign-in, the form quotes its own message
-and says whether your credentials are the problem:
+Your email, password and OTP code are checked by E-Distribuzione's website,
+not by Home Assistant. If the website refuses them, make sure you are using
+the credentials of the E-Distribuzione customer area (the grid operator), not
+those of your energy supplier (for example Enel Energia): they are two
+different accounts. If no OTP code arrives, log out of the official app and
+any other browser sessions, wait a few minutes and try again.
+
+After you paste the address or response, the setup explains what went wrong:
 
 | Message | What to do |
 |---|---|
-| **E-Distribuzione rejected the email or password** | Use the credentials of the E-Distribuzione customer area, the grid operator, not those of your energy supplier (for example Enel Energia): they are two different accounts. |
-| **Generic technical error** | Not a credentials problem: E-Distribuzione is not accepting the automated sign-in. The setup offers to sign in from the browser. |
-| **Account locked or disabled**, **password expired** | Fix it on the official website, then sign in here again. |
-| **Blocking automated access** (anti-bot check) | Not a credentials problem: sign in from the browser. |
+| **No address starting with eneldist://redirect** | Open developer tools (**F12**) on the **Network** tab and tick **Preserve log** before opening the authorization link, then copy all the text from the **Response** tab of **RemoteAccessAuthorizationPage.apexp** (or **AuthorizationPage** if you clicked Allow/Consenti), or the red **Console** line in Chrome and Edge. Do not paste the authorization link itself. |
+| **E-Distribuzione refused the authorization** | Open the authorization link again; if it happens again, try later. |
+| **The address belongs to another sign-in link** | Open the authorization link shown in the current setup and paste the new response. |
+| **The address is missing some data** | It was only partly copied: copy all the text from the **Response** tab, or the whole **Console** line. |
 | **Rejecting the official app's client** (`app_blocked`) | E-Distribuzione is refusing the client the integration signs in with. Not a credentials problem: try again later. |
-| **No address starting with eneldist://redirect** | Copy the address shown after signing in, not the link of the setup. |
-| **The address belongs to another sign-in link** | Open the authorization link of the current setup and paste the new address. |
-| **The address is missing some data** | It was only partly copied: copy all of it, to the end of the line. |
 | **Another E-Distribuzione account** (when signing in again) | The browser was signed in with another account: sign out of the portal and try again. |
-| **Unexpected answer** | The portal may be under maintenance or may have changed. If it keeps happening, open an issue with the log. |
-| **Cannot reach E-Distribuzione** | Check Home Assistant's internet connection and DNS. |
+| **No POD found for this account** | The account you signed in with has no PODs: make sure it is the account that holds your PODs in the E-Distribuzione customer area. |
+| **Unexpected error while retrieving the PODs** | Check Home Assistant's internet connection and DNS, then start the setup again from the beginning with a new authorization link. If it keeps happening, open an issue with the log. |
 
 ### Data stops updating
 

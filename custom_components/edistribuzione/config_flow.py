@@ -35,6 +35,7 @@ from .auth import (
 )
 from .const import (
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID_OAUTH,
     CONF_ENERGIA_REATTIVA,
     CONF_GIORNI_DA_RIPROVARE,
     CONF_INSTANCE_URL,
@@ -46,10 +47,13 @@ from .const import (
     CONF_TOKEN_ORIGINE,
     DOMAIN,
     LOGIN_PAGE_URL,
+    LOGIN_PASSWORD_DISPONIBILE,
+    OAUTH_CLIENT_ID,
     ORA_MINIMA_RICHIESTA,
     TIPO_POD_DEFAULT,
     TIPO_POD_PRODUZIONE,
     TIPO_POD_SCAMBIO,
+    client_id_della_entry,
 )
 from .dati_api import ruolo_suggerito_da_fornitura
 from .redaction import mask_pods_in_text, redact_secrets
@@ -76,7 +80,7 @@ STEP_PASSWORD_LOGIN_SCHEMA = vol.Schema({
 
 STEP_BROWSER_LOGIN_SCHEMA = vol.Schema({
     vol.Required("redirect_url"): selector.TextSelector(
-        selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD, autocomplete="off")
+        selector.TextSelectorConfig(multiline=True, autocomplete="off")
     ),
 })
 
@@ -207,7 +211,9 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self._testo("otp_solo_da_qui")
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
-        """Offer browser OAuth first, while keeping the password/OTP route."""
+        """Go straight to browser sign-in while automated password login is blocked."""
+        if not LOGIN_PASSWORD_DISPONIBILE:
+            return await self.async_step_browser_login()
         return self.async_show_menu(
             step_id="user",
             menu_options=["browser_login", "password_login"],
@@ -377,6 +383,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 **self._reauth_entry.data,
                 CONF_ACCESS_TOKEN: self._access_token,
                 CONF_REFRESH_TOKEN: self._refresh_token,
+                CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID,
                 CONF_INSTANCE_URL: self._instance_url,
                 CONF_TOKEN_ORIGINE: origine,
                 CONF_TOKEN_AGGIORNATO_IL: dt_util.now().isoformat(timespec="seconds"),
@@ -438,6 +445,7 @@ class EdistribuzioneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_PODS: pods,
                     CONF_ACCESS_TOKEN: self._access_token,
                     CONF_REFRESH_TOKEN: self._refresh_token,
+                    CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID,
                     CONF_INSTANCE_URL: self._instance_url,
                     CONF_TOKEN_ORIGINE: self._token_origine,
                     CONF_TOKEN_AGGIORNATO_IL: dt_util.now().isoformat(timespec="seconds"),
@@ -601,7 +609,9 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
 
         auth = AuthClient(session, instance_url=self.config_entry.data.get(CONF_INSTANCE_URL))
         try:
-            tokens = await auth.async_refresh_access_token(refresh_token)
+            tokens = await auth.async_refresh_access_token(
+                refresh_token, client_id_della_entry(self.config_entry.data)
+            )
         except AccessoBloccato:
             _LOGGER.warning("Opzioni: E-Distribuzione ha risposto con la verifica antibot")
             return self.async_abort(reason="accesso_bloccato")

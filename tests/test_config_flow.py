@@ -34,12 +34,15 @@ from custom_components.edistribuzione.auth import (
 )
 from custom_components.edistribuzione.const import (
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID_OAUTH,
     CONF_INSTANCE_URL,
     CONF_ORA_RICHIESTA,
     CONF_PODS,
     CONF_REFRESH_TOKEN,
     CONF_TIPO_POD,
     DOMAIN,
+    OAUTH_CLIENT_ID,
+    OAUTH_CLIENT_ID_PRECEDENTE,
     TIPO_POD_PRODUZIONE,
     TIPO_POD_SCAMBIO,
 )
@@ -91,17 +94,15 @@ def edist_mocks(monkeypatch):
 
 
 async def _fino_a_user(hass):
-    res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
-    return await hass.config_entries.flow.async_configure(
-        res["flow_id"], {"next_step_id": "password_login"}
-    )
+    with patch.object(cf, "LOGIN_PASSWORD_DISPONIBILE", True):
+        res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+        return await hass.config_entries.flow.async_configure(
+            res["flow_id"], {"next_step_id": "password_login"}
+        )
 
 
 async def _fino_al_browser(hass):
-    res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
-    return await hass.config_entries.flow.async_configure(
-        res["flow_id"], {"next_step_id": "browser_login"}
-    )
+    return await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
 
 
 async def test_login_nel_browser_crea_la_configurazione_con_i_token(hass, edist_mocks):
@@ -114,6 +115,7 @@ async def test_login_nel_browser_crea_la_configurazione_con_i_token(hass, edist_
     assert res["type"] == FlowResultType.CREATE_ENTRY
     assert res["data"][CONF_ACCESS_TOKEN] == "acc-browser"
     assert res["data"][CONF_REFRESH_TOKEN] == "ref-browser"
+    assert res["data"][CONF_CLIENT_ID_OAUTH] == OAUTH_CLIENT_ID
     assert res["data"][CONF_INSTANCE_URL] == "https://example.my.salesforce.com"
 
 
@@ -196,7 +198,14 @@ async def test_errore_tecnico_propone_l_accesso_dal_browser(hass, edist_mocks):
     assert set(res["menu_options"]) == {"browser_login", "riprova_login"}
 
 
-async def test_menu_login_offre_browser_e_password(hass):
+async def test_wizard_va_diretto_al_browser_quando_password_disabilitato(hass):
+    res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert res["type"] == FlowResultType.FORM
+    assert res["step_id"] == "browser_login"
+
+
+async def test_menu_login_offre_browser_e_password_quando_riattivato(hass, monkeypatch):
+    monkeypatch.setattr(cf, "LOGIN_PASSWORD_DISPONIBILE", True)
     res = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert res["step_id"] == "user"
     assert set(res["menu_options"]) == {"browser_login", "password_login"}
@@ -498,14 +507,10 @@ async def _reauth_nel_browser(hass, entry):
     res = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "reauth", "entry_id": entry.entry_id}, data=entry.data
     )
-    # Same choice as the setup, with the PODs being re-authenticated.
-    assert res["type"] == FlowResultType.MENU
-    assert set(res["menu_options"]) == {"browser_login", "password_login"}
-    assert "IT001E00000009" in res["description_placeholders"]["pod_correnti"]
-    res = await hass.config_entries.flow.async_configure(
-        res["flow_id"], {"next_step_id": "browser_login"}
-    )
+    # Goes straight to browser login while automated password login is disabled.
+    assert res["type"] == FlowResultType.FORM
     assert res["step_id"] == "browser_login"
+    assert "IT001E00000009" in res["description_placeholders"]["pod_correnti"]
     return await hass.config_entries.flow.async_configure(
         res["flow_id"], {"redirect_url": "eneldist://redirect#state=ok"}
     )
@@ -518,6 +523,7 @@ async def test_reauth_aggiorna_i_token(hass, edist_mocks):
     assert res["reason"] == "reauth_successful"
     assert entry.data[CONF_REFRESH_TOKEN] == "ref-browser"
     assert entry.data[CONF_ACCESS_TOKEN] == "acc-browser"
+    assert entry.data[CONF_CLIENT_ID_OAUTH] == OAUTH_CLIENT_ID
     assert entry.data[CONF_INSTANCE_URL] == "https://example.my.salesforce.com"
 
 
@@ -652,7 +658,9 @@ async def test_opzioni_token_salvato_scaduto_rinnova_e_salva(hass, edist_mocks):
         res["flow_id"], {"next_step_id": "aggiungi_pod"}
     )
     assert res["step_id"] == "aggiungi_pod"
-    edist_mocks.auth.async_refresh_access_token.assert_awaited_once_with("ref-vecchio")
+    edist_mocks.auth.async_refresh_access_token.assert_awaited_once_with(
+        "ref-vecchio", OAUTH_CLIENT_ID_PRECEDENTE
+    )
     assert entry.data[CONF_ACCESS_TOKEN] == "acc2"
     assert entry.data[CONF_REFRESH_TOKEN] == "ref-nuovo"
 
