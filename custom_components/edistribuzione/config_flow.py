@@ -23,6 +23,7 @@ from .auth import (
     AccountBloccato,
     AppBloccata,
     AuthClient,
+    ClientNonValido,
     ErroreTecnicoPortale,
     InvalidBrowserRedirect,
     InvalidCredentials,
@@ -49,6 +50,7 @@ from .const import (
     LOGIN_PAGE_URL,
     LOGIN_PASSWORD_DISPONIBILE,
     OAUTH_CLIENT_ID,
+    OAUTH_CLIENT_ID_PRECEDENTE,
     ORA_MINIMA_RICHIESTA,
     TIPO_POD_DEFAULT,
     TIPO_POD_PRODUZIONE,
@@ -607,15 +609,24 @@ class EdistribuzioneOptionsFlow(config_entries.OptionsFlow):
             self.config_entry.async_start_reauth(self.hass)
             return self.async_abort(reason="accesso_scaduto")
 
+        client_id = client_id_della_entry(self.config_entry.data)
         auth = AuthClient(session, instance_url=self.config_entry.data.get(CONF_INSTANCE_URL))
         try:
-            tokens = await auth.async_refresh_access_token(
-                refresh_token, client_id_della_entry(self.config_entry.data)
-            )
+            tokens = await auth.async_refresh_access_token(refresh_token, client_id)
         except AccessoBloccato:
             _LOGGER.warning("Opzioni: E-Distribuzione ha risposto con la verifica antibot")
             return self.async_abort(reason="accesso_bloccato")
-        except AppBloccata as err:
+        except (ClientNonValido, AppBloccata) as err:
+            if client_id == OAUTH_CLIENT_ID_PRECEDENTE:
+                _LOGGER.warning(
+                    "Opzioni: client OAuth precedente rifiutato (%s), avvio riautenticazione",
+                    err,
+                )
+                self.config_entry.async_start_reauth(self.hass)
+                return self.async_abort(reason="client_precedente_rifiutato")
+            if isinstance(err, ClientNonValido):
+                _LOGGER.warning("Opzioni: client OAuth attuale rifiutato (%s)", err)
+                return self.async_abort(reason="client_non_valido")
             _LOGGER.warning("Opzioni: E-Distribuzione blocca il client OAuth (%s)", err)
             return self.async_abort(reason="app_bloccata")
         except TokenNonValido:

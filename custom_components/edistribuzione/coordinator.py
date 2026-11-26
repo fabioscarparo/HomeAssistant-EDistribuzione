@@ -28,7 +28,14 @@ from homeassistant.util import dt as dt_util
 
 from . import raw_storage
 from .api import ApiClient, ApiError
-from .auth import AccessoBloccato, AppBloccata, AuthClient, AuthError, TokenNonValido
+from .auth import (
+    AccessoBloccato,
+    AppBloccata,
+    AuthClient,
+    AuthError,
+    ClientNonValido,
+    TokenNonValido,
+)
 from .const import (
     ABBANDONO_CODA_DOPO_GIORNI,
     CHUNK_GIORNI_STORICO,
@@ -55,6 +62,7 @@ from .const import (
     MAX_EVENTI_CRONOLOGIA,
     MAX_GIORNI_IN_CODA,
     MAX_GIORNI_RECUPERO_STORICO,
+    OAUTH_CLIENT_ID_PRECEDENTE,
     ORA_MINIMA_RICHIESTA,
     RITARDO_DATI_GIORNI,
     TIPO_POD_DEFAULT,
@@ -336,16 +344,15 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
                 self._registra_errore_accesso(err)
                 raise self._errore_rinnovo(err) from err
 
+            client_id = client_id_della_entry(self.entry.data)
             t0 = time.monotonic()
             try:
-                tokens = await self._auth.async_refresh_access_token(
-                    refresh_token, client_id_della_entry(self.entry.data)
-                )
+                tokens = await self._auth.async_refresh_access_token(refresh_token, client_id)
             except AuthError as err:
                 durata_ms = round((time.monotonic() - t0) * 1000)
                 self._registra_errore_accesso(err)
                 self._registra_evento("refresh", type(err).__name__, durata_ms)
-                raise self._errore_rinnovo(err) from err
+                raise self._errore_rinnovo(err, client_id) from err
             except (aiohttp.ClientError, TimeoutError) as err:
                 durata_ms = round((time.monotonic() - t0) * 1000)
                 self._registra_errore_accesso(err)
@@ -375,11 +382,29 @@ class EdistribuzioneCoordinator(DataUpdateCoordinator[dict]):
             if new_data != self.entry.data:
                 self.hass.config_entries.async_update_entry(self.entry, data=new_data)
 
-    def _errore_rinnovo(self, err: AuthError) -> HomeAssistantError:
+    def _errore_rinnovo(
+        self, err: AuthError, client_id: str | None = None
+    ) -> HomeAssistantError:
         """Convert a refresh AuthError into the matching HA error and Repairs notice."""
+        if client_id is None:
+            client_id = client_id_della_entry(self.entry.data)
         if isinstance(err, AccessoBloccato):
             self._segnala_blocco(ISSUE_ACCESSO_BLOCCATO)
             return UpdateFailed(translation_domain=DOMAIN, translation_key="accesso_bloccato")
+        if (
+            isinstance(err, (ClientNonValido, AppBloccata))
+            and client_id == OAUTH_CLIENT_ID_PRECEDENTE
+        ):
+            # Entry still bound to the previous OAuth client: signing in again
+            # migrates it to the current client while keeping PODs and history.
+            _LOGGER.warning("Client OAuth precedente rifiutato, richiesta riautenticazione: %s", err)
+            self._accesso_riuscito()
+            return ConfigEntryAuthFailed(
+                translation_domain=DOMAIN, translation_key="client_precedente_rifiutato"
+            )
+        if isinstance(err, ClientNonValido):
+            _LOGGER.warning("Client OAuth attuale rifiutato da E-Distribuzione: %s", err)
+            return UpdateFailed(translation_domain=DOMAIN, translation_key="client_non_valido")
         if isinstance(err, AppBloccata):
             _LOGGER.warning("Rinnovo dell'accesso rifiutato: %s", err)
             self._segnala_blocco(ISSUE_APP_BLOCCATA)

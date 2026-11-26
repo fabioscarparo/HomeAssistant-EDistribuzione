@@ -138,6 +138,8 @@
       "supplies_failed": "Unexpected error while retrieving the PODs from the account. Try again later.",
       "accesso_bloccato": "E-Distribuzione is currently blocking automated access with an anti-bot check, so the integration cannot sign in. It does not depend on your credentials: try again later, without insisting.",
       "app_bloccata": "E-Distribuzione is rejecting the official app's client the integration uses to sign in (\"app_blocked\" answer). It does not depend on your credentials: try again later.",
+      "client_precedente_rifiutato": "E-Distribuzione no longer accepts the app client used for the previous sign-in. Sign in again from the notice in Settings > Devices & services to switch to the updated client: PODs, options and history are kept.",
+      "client_non_valido": "E-Distribuzione no longer accepts the OAuth client used by this version of the integration. It does not depend on your credentials: check if an integration update is available.",
       "accesso_scaduto": "Access to E-Distribuzione has expired. Sign in again from the notice in Settings > Devices & services: PODs, options and history are kept."
     }
   },
@@ -490,6 +492,12 @@
     },
     "app_bloccata": {
       "message": "E-Distribuzione is rejecting the official app's client the integration uses to sign in (\"app_blocked\" answer), so access cannot be renewed. It does not depend on your credentials: the integration retries on its own every hour."
+    },
+    "client_precedente_rifiutato": {
+      "message": "E-Distribuzione no longer accepts the app client used for the previous sign-in. Sign in again from the notice in Settings > Devices & services to switch to the updated client: PODs, options and history are kept."
+    },
+    "client_non_valido": {
+      "message": "E-Distribuzione no longer accepts the OAuth client used by this version of the integration. It does not depend on your credentials and signing in again would reuse the same client: check if an integration update is available."
     },
     "accesso_scaduto": {
       "message": "Access to E-Distribuzione has expired or was revoked (for example after a password change). Sign in again from the notice in Settings > Devices & services: PODs, options and history are kept."

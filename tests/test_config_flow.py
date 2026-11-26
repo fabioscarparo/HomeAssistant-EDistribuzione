@@ -23,6 +23,7 @@ from custom_components.edistribuzione.auth import (
     AccessoBloccato,
     AccountBloccato,
     AppBloccata,
+    ClientNonValido,
     ErroreTecnicoPortale,
     InvalidCredentials,
     InvalidOtp,
@@ -665,8 +666,10 @@ async def test_opzioni_token_salvato_scaduto_rinnova_e_salva(hass, edist_mocks):
     assert entry.data[CONF_REFRESH_TOKEN] == "ref-nuovo"
 
 
-async def _opzioni_aggiungi_pod_con_rinnovo(hass, edist_mocks, errore):
+async def _opzioni_aggiungi_pod_con_rinnovo(hass, edist_mocks, errore, *, extra_data=None):
     entry = _entry_edist(hass, pods=["IT001E00000009"])
+    if extra_data:
+        hass.config_entries.async_update_entry(entry, data={**entry.data, **extra_data})
     edist_mocks.auth.async_refresh_access_token.side_effect = errore
     res = await hass.config_entries.options.async_init(entry.entry_id)
     res = await hass.config_entries.options.async_configure(
@@ -689,15 +692,36 @@ async def test_opzioni_aggiungi_pod_con_accesso_scaduto_chiede_un_nuovo_login(
 
 
 @pytest.mark.parametrize(
+    "errore",
+    [ClientNonValido("invalid_client_id"), AppBloccata("app_blocked")],
+)
+async def test_opzioni_aggiungi_pod_client_precedente_rifiutato_chiede_riautenticazione(
+    hass, edist_mocks, errore
+):
+    entry, res = await _opzioni_aggiungi_pod_con_rinnovo(hass, edist_mocks, errore)
+    assert res["type"] == FlowResultType.ABORT
+    assert res["reason"] == "client_precedente_rifiutato"
+    flussi = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [f["context"]["source"] for f in flussi] == ["reauth"]
+    assert flussi[0]["context"]["entry_id"] == entry.entry_id
+
+
+@pytest.mark.parametrize(
     ("errore", "motivo"),
     [
         (AppBloccata("app_blocked"), "app_bloccata"),
+        (ClientNonValido("invalid_client_id"), "client_non_valido"),
         (AccessoBloccato("antibot"), "accesso_bloccato"),
         (RuntimeError("boom"), "refresh_failed"),
     ],
 )
 async def test_opzioni_aggiungi_pod_rinnovo_fallito(hass, edist_mocks, errore, motivo):
-    _, res = await _opzioni_aggiungi_pod_con_rinnovo(hass, edist_mocks, errore)
+    _, res = await _opzioni_aggiungi_pod_con_rinnovo(
+        hass,
+        edist_mocks,
+        errore,
+        extra_data={CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID},
+    )
     assert res["type"] == FlowResultType.ABORT
     assert res["reason"] == motivo
     assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)

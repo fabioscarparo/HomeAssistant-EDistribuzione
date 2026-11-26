@@ -21,6 +21,7 @@ from custom_components.edistribuzione.auth import (
     AccessoBloccato,
     AppBloccata,
     AuthError,
+    ClientNonValido,
     TokenNonValido,
 )
 from custom_components.edistribuzione.const import (
@@ -124,7 +125,9 @@ async def test_anche_il_403_rinnova_il_token(make_edist_coordinator):
 async def test_token_salvato_scaduto_e_rinnovo_bloccato(hass, make_edist_coordinator):
     """The case the browser login leaves behind once its access token expires
     while E-Distribuzione still blocks the refresh: notice, data kept."""
-    coordinator = make_edist_coordinator(data={CONF_ACCESS_TOKEN: "scaduto"})
+    coordinator = make_edist_coordinator(
+        data={CONF_ACCESS_TOKEN: "scaduto", CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID}
+    )
     coordinator._api.async_get_daily_load_profile = AsyncMock(
         side_effect=ApiError("401", status=401)
     )
@@ -172,8 +175,8 @@ async def test_token_bloccato_avvisa_e_l_avviso_sparisce_quando_torna(
 async def test_client_rifiutato_avvisa_senza_chiedere_un_nuovo_login(
     hass, make_edist_coordinator
 ):
-    """Issue #4: 'app_blocked' on refresh creates a dedicated notice without reauth."""
-    coordinator = make_edist_coordinator()
+    """'app_blocked' on the current client creates a dedicated notice without reauth."""
+    coordinator = make_edist_coordinator(data={CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID})
     registro = ir.async_get(hass)
     issue_app = issue_id_per_entry(ISSUE_APP_BLOCCATA, coordinator.entry.entry_id)
     issue_acc = issue_id_per_entry(ISSUE_ACCESSO_BLOCCATO, coordinator.entry.entry_id)
@@ -205,6 +208,42 @@ async def test_client_rifiutato_avvisa_senza_chiedere_un_nuovo_login(
     assert registro.async_get_issue(DOMAIN, issue_app) is None
 
 
+@pytest.mark.parametrize(
+    "errore_auth",
+    [ClientNonValido("invalid_client_id"), AppBloccata("app_blocked")],
+)
+async def test_client_precedente_rifiutato_chiede_riautenticazione(
+    hass, make_edist_coordinator, errore_auth
+):
+    """Legacy entry without saved client_id: client rejection triggers reauth."""
+    coordinator = make_edist_coordinator()
+    coordinator._segnala_blocco(ISSUE_APP_BLOCCATA)
+    coordinator._auth.async_refresh_access_token = AsyncMock(side_effect=errore_auth)
+    with pytest.raises(ConfigEntryAuthFailed) as errore:
+        await coordinator._async_ensure_token()
+    assert errore.value.translation_key == "client_precedente_rifiutato"
+    assert coordinator._auth.async_refresh_access_token.await_args.args == (
+        "rt",
+        OAUTH_CLIENT_ID_PRECEDENTE,
+    )
+    issue_app = issue_id_per_entry(ISSUE_APP_BLOCCATA, coordinator.entry.entry_id)
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_app) is None
+
+
+async def test_client_attuale_non_valido_non_chiede_riautenticazione(
+    hass, make_edist_coordinator
+):
+    """Current client rejected: reauth would reuse the same client, so raise UpdateFailed."""
+    coordinator = make_edist_coordinator(data={CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID})
+    coordinator._auth.async_refresh_access_token = AsyncMock(
+        side_effect=ClientNonValido("invalid_client_id")
+    )
+    with pytest.raises(UpdateFailed) as errore:
+        await coordinator._async_ensure_token()
+    assert errore.value.translation_key == "client_non_valido"
+    assert not coordinator.accesso_bloccato
+
+
 async def test_token_scaduto_chiede_un_nuovo_login(hass, make_edist_coordinator):
     coordinator = make_edist_coordinator()
     coordinator._auth.async_refresh_access_token = AsyncMock(
@@ -226,11 +265,10 @@ async def test_portale_non_raggiungibile_ha_un_messaggio_suo(hass, make_edist_co
     assert errore.value.translation_placeholders == {"errore": "ClientConnectionError"}
 
 
-async def _setup_con_rinnovo(hass, effetto):
+async def _setup_con_rinnovo(hass, effetto, *, extra_data=None):
     """Full setup of the integration with a simulated token refresh."""
-    entry = MockConfigEntry(
-        domain=DOMAIN, data={CONF_REFRESH_TOKEN: "rt", CONF_PODS: [POD_A]}, title=POD_A
-    )
+    dati = {CONF_REFRESH_TOKEN: "rt", CONF_PODS: [POD_A], **(extra_data or {})}
+    entry = MockConfigEntry(domain=DOMAIN, data=dati, title=POD_A)
     entry.add_to_hass(hass)
     auth = Mock()
     auth.async_refresh_access_token = AsyncMock(side_effect=effetto)
@@ -253,12 +291,28 @@ async def test_setup_bloccato_si_completa_senza_tentativi_ravvicinati(hass):
 
 
 async def test_client_rifiutato_all_avvio_completa_il_setup(hass):
-    entry, auth = await _setup_con_rinnovo(hass, AppBloccata("app_blocked"))
+    entry, auth = await _setup_con_rinnovo(
+        hass,
+        AppBloccata("app_blocked"),
+        extra_data={CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID},
+    )
     assert entry.state is ConfigEntryState.LOADED
     assert auth.async_refresh_access_token.await_count == 1
     issue_id = issue_id_per_entry(ISSUE_APP_BLOCCATA, entry.entry_id)
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
     assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+
+@pytest.mark.parametrize(
+    "errore_auth",
+    [ClientNonValido("invalid_client_id"), AppBloccata("app_blocked")],
+)
+async def test_client_precedente_rifiutato_all_avvio_apre_la_riautenticazione(hass, errore_auth):
+    entry, _ = await _setup_con_rinnovo(hass, errore_auth)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    flussi = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [f["context"]["source"] for f in flussi] == ["reauth"]
+    assert entry.entry_id not in hass.data.get(DOMAIN, {})
 
 
 async def test_token_scaduto_all_avvio_apre_la_riautenticazione(hass):

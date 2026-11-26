@@ -20,7 +20,7 @@
 
 const CARD_TYPE = "edistribuzione-pod-card";
 const EDITOR_TYPE = "edistribuzione-pod-card-editor";
-const VERSION = "1.1.0";
+const VERSION = "1.1.1";
 const SOURCE = "edistribuzione";
 const FASCE = ["f1", "f2", "f3"];
 // Keys of the injection by band (issue #7), next to the consumption ones.

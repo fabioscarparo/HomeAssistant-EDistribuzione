@@ -138,6 +138,8 @@
       "supplies_failed": "Errore imprevisto nel recupero dei POD dall'account. Riprova più tardi.",
       "accesso_bloccato": "E-Distribuzione al momento blocca l'accesso automatico con una verifica antibot, quindi l'integrazione non riesce ad accedere. Non dipende dalle tue credenziali: riprova più tardi, senza insistere.",
       "app_bloccata": "E-Distribuzione sta rifiutando il client dell'app ufficiale che l'integrazione usa per accedere (risposta «app_blocked»). Non dipende dalle tue credenziali: riprova più tardi.",
+      "client_precedente_rifiutato": "E-Distribuzione non accetta più il client dell'app con cui è stato fatto l'accesso precedente. Accedi di nuovo dalla notifica in Impostazioni > Dispositivi e servizi per passare al client aggiornato: POD, opzioni e storico restano.",
+      "client_non_valido": "E-Distribuzione non accetta il client OAuth usato da questa versione dell'integrazione. Non dipende dalle tue credenziali: controlla se è disponibile un aggiornamento dell'integrazione.",
       "accesso_scaduto": "L'accesso a E-Distribuzione è scaduto. Accedi di nuovo dalla notifica in Impostazioni > Dispositivi e servizi: POD, opzioni e storico restano."
     }
   },
@@ -490,6 +492,12 @@
     },
     "app_bloccata": {
       "message": "E-Distribuzione sta rifiutando il client dell'app ufficiale che l'integrazione usa per accedere (risposta «app_blocked»), quindi l'accesso non si rinnova. Non dipende dalle tue credenziali: l'integrazione riprova da sola ogni ora."
+    },
+    "client_precedente_rifiutato": {
+      "message": "E-Distribuzione non accetta più il client dell'app con cui è stato fatto l'accesso precedente. Accedi di nuovo dalla notifica in Impostazioni > Dispositivi e servizi per passare al client aggiornato: POD, opzioni e storico restano."
+    },
+    "client_non_valido": {
+      "message": "E-Distribuzione non accetta il client OAuth usato da questa versione dell'integrazione. Non dipende dalle tue credenziali e un nuovo accesso userebbe lo stesso client: controlla se è disponibile un aggiornamento dell'integrazione."
     },
     "accesso_scaduto": {
       "message": "L'accesso a E-Distribuzione è scaduto o è stato revocato (ad esempio dopo un cambio password). Accedi di nuovo dalla notifica in Impostazioni > Dispositivi e servizi: POD, opzioni e storico restano."

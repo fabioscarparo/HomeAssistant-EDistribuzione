@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+- **Automatic re-authentication when the previous OAuth client is rejected**: installations still
+  using the pre-1.1.0 OAuth client now immediately prompt for re-authentication if E-Distribuzione
+  rejects that client (`invalid_client_id`, `invalid_client`, or `app_blocked`), allowing a quick
+  browser sign-in to switch to the updated client while preserving PODs, options, and history
+  (both in background refreshes and in **Configure -> Add POD**).
+- **Dedicated handling for `invalid_client_id` / `invalid_client`**: token refreshes rejected for
+  an invalid client no longer retry the fallback portal host and, when the current OAuth client is
+  affected, report clearly that an integration update is required instead of requesting an
+  unhelpful re-authentication.
+
 ## 1.1.0
 
 ### Added

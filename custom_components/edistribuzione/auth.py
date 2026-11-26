@@ -190,6 +190,13 @@ class TokenNonValido(AuthError):
     """Refresh token or authorization code expired or revoked (invalid_grant)."""
 
 
+class ClientNonValido(AuthError):
+    """OAuth client rejected by the token endpoint (invalid_client_id or invalid_client)."""
+
+
+_ERRORI_CLIENT_NON_VALIDO = ("invalid_client_id", "invalid_client")
+
+
 class InvalidBrowserRedirect(AuthError):
     """Pasted redirect URL from browser login is missing or invalid."""
 
@@ -271,6 +278,8 @@ def _errore_oauth(codice: str | None, descrizione: str | None, contesto: str) ->
         return AppBloccata(dettaglio)
     if codice == "invalid_grant":
         return TokenNonValido(dettaglio)
+    if codice in _ERRORI_CLIENT_NON_VALIDO:
+        return ClientNonValido(dettaglio)
     return AuthError(dettaglio)
 
 
@@ -1047,8 +1056,10 @@ class AuthClient:
                 raise primo_errore from None
             except AuthError as err:
                 # If the fallback host fails generically after the primary host already
-                # failed, preserve the primary reason (except explicit invalid_grant).
-                if primo_errore is not None and not isinstance(err, TokenNonValido):
+                # failed, preserve the primary reason (except explicit token/client rejection).
+                if primo_errore is not None and not isinstance(
+                    err, (TokenNonValido, ClientNonValido)
+                ):
                     raise primo_errore from None
                 raise
             self._host = host

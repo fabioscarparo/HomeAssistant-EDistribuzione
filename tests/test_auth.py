@@ -895,12 +895,45 @@ class TestErroriToken:
         with pytest.raises(auth.TokenNonValido, match="expired access/refresh token"):
             await auth.AuthClient(session).async_refresh_access_token("rt")
 
+    @pytest.mark.parametrize(
+        "corpo",
+        [
+            '{"error":"invalid_client_id","error_description":"client identifier invalid"}',
+            '{"error":"invalid_client","error_description":"invalid client credentials"}',
+        ],
+    )
+    async def test_client_rifiutato_ha_eccezione_dedicata_e_non_ripiega(self, corpo):
+        session = _SessioneACoda([_RispostaToken(corpo, status=400)])
+        with pytest.raises(auth.ClientNonValido) as errore:
+            await auth.AuthClient(session).async_refresh_access_token("rt")
+        assert isinstance(errore.value, auth.AuthError)
+        assert not isinstance(errore.value, auth.TokenNonValido)
+        assert len(session.post_inviati) == 1
+
+    async def test_fallback_timeout_non_maschera_client_non_valido(self):
+        class _SessioneConTimeout(_SessioneACoda):
+            def post(self, url, data=None, headers=None, allow_redirects=None, **kwargs):
+                self.post_inviati.append({"url": url, "data": data, "headers": headers})
+                nxt = self._prossima()
+                if isinstance(nxt, Exception):
+                    raise nxt
+                return nxt
+
+        session = _SessioneConTimeout(
+            [TimeoutError(), _RispostaToken('{"error":"invalid_client_id"}', status=400)]
+        )
+        with pytest.raises(auth.ClientNonValido):
+            await auth.AuthClient(session).async_refresh_access_token("rt")
+        assert len(session.post_inviati) == 2
+
     async def test_altri_errori_oauth_restano_generici(self):
-        session = _SessioneACoda([_RispostaToken('{"error":"invalid_client"}', status=400)])
+        session = _SessioneACoda(
+            [_RispostaToken('{"error":"unsupported_grant_type"}', status=400)]
+        )
         with pytest.raises(auth.AuthError) as errore:
             await auth.AuthClient(session).async_refresh_access_token("rt")
         assert type(errore.value) is auth.AuthError
-        assert "invalid_client" in str(errore.value)
+        assert "unsupported_grant_type" in str(errore.value)
 
     async def test_app_blocked_dopo_l_otp(self):
         session = _SessioneACoda([_RispostaToken(APP_BLOCKED, status=400)])

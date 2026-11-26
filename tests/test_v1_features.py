@@ -22,6 +22,7 @@ from custom_components.edistribuzione import (
 from custom_components.edistribuzione.auth import AuthClient, TokenNonValido
 from custom_components.edistribuzione.const import (
     CONF_ACCESS_TOKEN,
+    CONF_CLIENT_ID_OAUTH,
     CONF_ENERGIA_REATTIVA,
     CONF_INSTANCE_URL,
     CONF_PODS,
@@ -34,6 +35,7 @@ from custom_components.edistribuzione.const import (
     MAGNITUDE_REATTIVA_R2,
     MAGNITUDE_REATTIVA_R3,
     MAGNITUDE_REATTIVA_R4,
+    OAUTH_CLIENT_ID,
     TIPO_POD_PRODUZIONE,
     TIPO_POD_SCAMBIO,
 )
@@ -573,7 +575,10 @@ async def test_coordinator_blocked_refresh_on_pre_curve_supplies_stops_cycle_aft
     from custom_components.edistribuzione.api import ApiError
     from custom_components.edistribuzione.auth import AppBloccata
 
-    coord = make_edist_coordinator(pods=[POD_A], data={CONF_ACCESS_TOKEN: "expired"})
+    coord = make_edist_coordinator(
+        pods=[POD_A],
+        data={CONF_ACCESS_TOKEN: "expired", CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID},
+    )
     coord._prossima_richiesta = AsyncMock(
         return_value=(date(2026, 11, 18), date(2026, 11, 18))
     )
@@ -595,7 +600,7 @@ async def test_coordinator_ausiliari_stop_on_first_blocked_refresh(hass, make_ed
 
     coord = make_edist_coordinator(
         pods=[POD_A, POD_B],
-        data={CONF_ACCESS_TOKEN: "expired"},
+        data={CONF_ACCESS_TOKEN: "expired", CONF_CLIENT_ID_OAUTH: OAUTH_CLIENT_ID},
         options={CONF_ENERGIA_REATTIVA: True},
     )
     coord._prossima_richiesta = AsyncMock(return_value=None)
